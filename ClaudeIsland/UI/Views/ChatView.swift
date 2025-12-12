@@ -111,6 +111,10 @@ struct ChatView: View {
                 isLoading = false
             }
         }
+        .onAppear {
+            // Mark session as viewed when chat opens (clears unseen completion indicator)
+            sessionMonitor.markSessionViewed(sessionId: sessionId)
+        }
         .onReceive(ChatHistoryManager.shared.$histories) { histories in
             // Update when count changes, last item differs, or content changes (e.g., tool status)
             if let newHistory = histories[sessionId] {
