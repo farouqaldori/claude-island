@@ -72,6 +72,9 @@ actor SessionStore {
         case .clearDetected(let sessionId):
             await processClearDetected(sessionId: sessionId)
 
+        case .sessionViewed(let sessionId):
+            processSessionViewed(sessionId: sessionId)
+
         case .sessionEnded(let sessionId):
             await processSessionEnd(sessionId: sessionId)
 
@@ -142,9 +145,22 @@ actor SessionStore {
         }
 
         let newPhase = event.determinePhase()
+        let previousPhase = session.phase
 
         if session.phase.canTransition(to: newPhase) {
             session.phase = newPhase
+
+            // Mark as unseen completion when transitioning from active work to idle/waitingForInput
+            if previousPhase.isActive && (newPhase == .idle || newPhase == .waitingForInput) {
+                session.hasUnseenCompletion = true
+                Self.logger.debug("Session \(sessionId.prefix(8), privacy: .public) completed - marked as unseen")
+            }
+
+            // Clear unseen state when session starts processing again
+            if newPhase.isActive && session.hasUnseenCompletion {
+                session.hasUnseenCompletion = false
+                Self.logger.debug("Session \(sessionId.prefix(8), privacy: .public) resumed - cleared unseen")
+            }
         } else {
             Self.logger.debug("Invalid transition: \(String(describing: session.phase), privacy: .public) -> \(String(describing: newPhase), privacy: .public), ignoring")
         }
@@ -822,6 +838,18 @@ actor SessionStore {
         }
 
         sessions[sessionId] = session
+    }
+
+    // MARK: - Session Viewed Processing
+
+    private func processSessionViewed(sessionId: String) {
+        guard var session = sessions[sessionId] else { return }
+
+        if session.hasUnseenCompletion {
+            session.hasUnseenCompletion = false
+            sessions[sessionId] = session
+            Self.logger.debug("Session \(sessionId.prefix(8), privacy: .public) marked as seen")
+        }
     }
 
     // MARK: - Clear Processing

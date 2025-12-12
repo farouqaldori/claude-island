@@ -53,6 +53,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// This removes pre-/clear items that no longer exist in the JSONL
     var needsClearReconciliation: Bool
 
+    // MARK: - Attention State
+
+    /// True when session completed work and user hasn't seen it yet
+    var hasUnseenCompletion: Bool
+
     // MARK: - Timestamps
 
     var lastActivity: Date
@@ -80,6 +85,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
             lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
         ),
         needsClearReconciliation: Bool = false,
+        hasUnseenCompletion: Bool = false,
         lastActivity: Date = Date(),
         createdAt: Date = Date()
     ) {
@@ -95,6 +101,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.subagentState = subagentState
         self.conversationInfo = conversationInfo
         self.needsClearReconciliation = needsClearReconciliation
+        self.hasUnseenCompletion = hasUnseenCompletion
         self.lastActivity = lastActivity
         self.createdAt = createdAt
     }
@@ -103,7 +110,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     /// Whether this session needs user attention
     var needsAttention: Bool {
-        phase.needsAttention
+        phase.needsAttention || hasUnseenCompletion
     }
 
     /// The active permission context, if any

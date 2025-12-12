@@ -83,6 +83,12 @@ struct ClaudeInstancesView: View {
             .padding(.vertical, 4)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .onAppear {
+            // Mark all unseen completions as viewed when panel is expanded
+            for session in sessionMonitor.instances where session.hasUnseenCompletion {
+                sessionMonitor.markSessionViewed(sessionId: session.sessionId)
+            }
+        }
     }
 
     // MARK: - Actions
@@ -101,6 +107,8 @@ struct ClaudeInstancesView: View {
 
     private func openChat(_ session: SessionState) {
         viewModel.showChat(for: session)
+        // Mark session as viewed when opening chat
+        sessionMonitor.markSessionViewed(sessionId: session.sessionId)
     }
 
     private func approveSession(_ session: SessionState) {
@@ -314,9 +322,14 @@ struct InstanceRow: View {
                 .fill(TerminalColors.green)
                 .frame(width: 6, height: 6)
         case .idle, .ended:
-            Circle()
-                .fill(Color.white.opacity(0.2))
-                .frame(width: 6, height: 6)
+            if session.hasUnseenCompletion {
+                // Show orange checkmark for completed but unseen sessions
+                CompletedUnseenIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+            } else {
+                Circle()
+                    .fill(Color.white.opacity(0.2))
+                    .frame(width: 6, height: 6)
+            }
         }
     }
 

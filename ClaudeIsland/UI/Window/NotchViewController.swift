@@ -62,14 +62,24 @@ class NotchViewController: NSViewController {
                     height: panelHeight
                 )
             case .closed, .popping:
-                // When closed, use the notch rect
+                // When closed, use the notch rect (expanded if showing activity)
                 let notchRect = geometry.deviceNotchRect
                 let screenWidth = geometry.screenRect.width
+
+                // Calculate expansion width if showing activity (matches NotchView.expansionWidth)
+                let activityCoordinator = NotchActivityCoordinator.shared
+                var expansionWidth: CGFloat = 0
+                if activityCoordinator.expandingActivity.show {
+                    // Base expansion + indicator space (conservative estimate)
+                    expansionWidth = 2 * max(0, notchRect.height - 12) + 20 + 18
+                }
+
+                let totalWidth = notchRect.width + expansionWidth
                 // Add some padding for easier interaction
                 return CGRect(
-                    x: (screenWidth - notchRect.width) / 2 - 10,
+                    x: (screenWidth - totalWidth) / 2 - 10,
                     y: windowHeight - notchRect.height - 5,
-                    width: notchRect.width + 20,
+                    width: totalWidth + 20,
                     height: notchRect.height + 10
                 )
             }

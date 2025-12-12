@@ -120,6 +120,13 @@ class ClaudeSessionMonitor: ObservableObject {
         }
     }
 
+    /// Mark a session as viewed, clearing the unseen completion state
+    func markSessionViewed(sessionId: String) {
+        Task {
+            await SessionStore.shared.process(.sessionViewed(sessionId: sessionId))
+        }
+    }
+
     // MARK: - State Update
 
     private func updateFromSessions(_ sessions: [SessionState]) {

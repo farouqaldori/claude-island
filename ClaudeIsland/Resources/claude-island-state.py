@@ -1,16 +1,60 @@
 #!/usr/bin/env python3
 """
-Claude Island Hook
+Claude Island Hook (Secure Version)
 - Sends session state to ClaudeIsland.app via Unix socket
 - For PermissionRequest: waits for user decision from the app
+- Security: Token auth, socket ownership verification, secure paths
 """
 import json
 import os
 import socket
+import stat
 import sys
 
-SOCKET_PATH = "/tmp/claude-island.sock"
+# Secure socket location in user's Application Support directory
+APP_SUPPORT_DIR = os.path.expanduser("~/Library/Application Support/ClaudeIsland")
+SOCKET_PATH = os.path.join(APP_SUPPORT_DIR, "claude-island.sock")
+TOKEN_PATH = os.path.join(APP_SUPPORT_DIR, "auth-token")
 TIMEOUT_SECONDS = 300  # 5 minutes for permission decisions
+
+
+def verify_socket_security():
+    """Verify socket exists and is owned by current user"""
+    try:
+        # Check socket exists
+        if not os.path.exists(SOCKET_PATH):
+            return False, "Socket does not exist"
+
+        # Check socket ownership - must be owned by current user
+        sock_stat = os.stat(SOCKET_PATH)
+        if sock_stat.st_uid != os.getuid():
+            return False, f"Socket owned by uid {sock_stat.st_uid}, expected {os.getuid()}"
+
+        # Check it's actually a socket
+        if not stat.S_ISSOCK(sock_stat.st_mode):
+            return False, "Path is not a socket"
+
+        return True, None
+    except OSError as e:
+        return False, str(e)
+
+
+def read_auth_token():
+    """Read authentication token from secure file"""
+    try:
+        # Verify token file ownership
+        if os.path.exists(TOKEN_PATH):
+            token_stat = os.stat(TOKEN_PATH)
+            if token_stat.st_uid != os.getuid():
+                return None  # Token file not owned by us
+            # Check permissions are restrictive (owner only)
+            if token_stat.st_mode & 0o077:
+                return None  # Token file has unsafe permissions
+
+        with open(TOKEN_PATH, 'r') as f:
+            return f.read().strip()
+    except (OSError, IOError):
+        return None
 
 
 def get_tty():
@@ -52,6 +96,21 @@ def get_tty():
 def send_event(state):
     """Send event to app, return response if any"""
     try:
+        # Security check 1: Verify socket ownership before connecting
+        is_safe, error = verify_socket_security()
+        if not is_safe:
+            # Silent fail - app might not be running
+            return None
+
+        # Security check 2: Read and include auth token
+        auth_token = read_auth_token()
+        if not auth_token:
+            # No valid token - app might not be running or token compromised
+            return None
+
+        # Add auth token to the state
+        state["_auth_token"] = auth_token
+
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(TIMEOUT_SECONDS)
         sock.connect(SOCKET_PATH)

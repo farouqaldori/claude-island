@@ -42,3 +42,4 @@ releases/
 # Xcode backup
 *.xcodeproj.backup/
 CLAUDE.md
+pending_tasks.md

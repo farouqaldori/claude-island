@@ -36,6 +36,11 @@ struct NotchView: View {
         sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
     }
 
+    /// Whether any Claude session has an unseen completion
+    private var hasUnseenCompletion: Bool {
+        sessionMonitor.instances.contains { $0.hasUnseenCompletion }
+    }
+
     // MARK: - Sizing
 
     private var closedNotchSize: CGSize {
@@ -52,15 +57,16 @@ struct NotchView: View {
             switch activityCoordinator.expandingActivity.type {
             case .claude:
                 let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
-                // Add extra width for permission indicator
-                return baseWidth + (hasPendingPermission ? 18 : 0)
+                // Add extra width for permission or completion indicator
+                let indicatorWidth: CGFloat = (hasPendingPermission || hasUnseenCompletion) ? 18 : 0
+                return baseWidth + indicatorWidth
             case .none:
                 break
             }
         }
 
-        // Also expand for pending permissions even without processing
-        if hasPendingPermission {
+        // Also expand for pending permissions or unseen completions even without processing
+        if hasPendingPermission || hasUnseenCompletion {
             return 2 * max(0, closedNotchSize.height - 12) + 20 + 18
         }
 
@@ -144,6 +150,7 @@ struct NotchView: View {
                     .animation(openAnimation, value: notchSize) // Animate container size changes between content types
                     .animation(.smooth, value: activityCoordinator.expandingActivity)
                     .animation(.smooth, value: hasPendingPermission)
+                    .animation(.smooth, value: hasUnseenCompletion)
                     .contentShape(Rectangle())
                     .onHover { hovering in
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
@@ -180,9 +187,9 @@ struct NotchView: View {
         activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
     }
 
-    /// Whether to show the expanded closed state (processing or pending permission)
+    /// Whether to show the expanded closed state (processing, pending permission, or unseen completion)
     private var showClosedActivity: Bool {
-        isProcessing || hasPendingPermission
+        isProcessing || hasPendingPermission || hasUnseenCompletion
     }
 
     @ViewBuilder
@@ -213,7 +220,7 @@ struct NotchView: View {
     @ViewBuilder
     private var headerRow: some View {
         HStack(spacing: 0) {
-            // Left side - crab + optional permission indicator (visible when processing or pending)
+            // Left side - crab + optional indicator (visible when processing, pending, or unseen completion)
             if showClosedActivity {
                 HStack(spacing: 4) {
                     ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
@@ -224,8 +231,16 @@ struct NotchView: View {
                         PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
                             .matchedGeometryEffect(id: "permission", in: activityNamespace, isSource: showClosedActivity)
                     }
+                    // Completion indicator when unseen (and not pending permission)
+                    else if hasUnseenCompletion {
+                        CompletedUnseenIcon(size: 16, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                            .matchedGeometryEffect(id: "completion", in: activityNamespace, isSource: showClosedActivity)
+                    }
                 }
-                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
+                .frame(
+                    width: viewModel.status == .opened ? nil : sideWidth + ((hasPendingPermission || hasUnseenCompletion) ? 18 : 0),
+                    alignment: viewModel.status == .opened ? .center : .leading  // Push left icons toward outer edge
+                )
                 .padding(.leading, viewModel.status == .opened ? 8 : 0)
             }
 
@@ -249,7 +264,10 @@ struct NotchView: View {
             if showClosedActivity {
                 ProcessingSpinner()
                     .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                    .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                    .frame(
+                        width: viewModel.status == .opened ? 20 : sideWidth,
+                        alignment: viewModel.status == .opened ? .center : .trailing  // Push spinner toward outer edge
+                    )
             }
         }
         .frame(height: closedNotchSize.height)
@@ -332,8 +350,8 @@ struct NotchView: View {
     // MARK: - Event Handlers
 
     private func handleProcessingChange() {
-        if isAnyProcessing || hasPendingPermission {
-            // Show claude activity when processing or waiting for permission
+        if isAnyProcessing || hasPendingPermission || hasUnseenCompletion {
+            // Show claude activity when processing, waiting for permission, or has unseen completion
             activityCoordinator.showActivity(type: .claude)
             isVisible = true
         } else {
@@ -343,7 +361,7 @@ struct NotchView: View {
             // Delay hiding the notch until animation completes
             if viewModel.status == .closed {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !isAnyProcessing && !hasPendingPermission && viewModel.status == .closed {
+                    if !isAnyProcessing && !hasPendingPermission && !hasUnseenCompletion && viewModel.status == .closed {
                         isVisible = false
                     }
                 }

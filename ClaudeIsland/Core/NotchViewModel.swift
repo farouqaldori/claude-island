@@ -128,8 +128,29 @@ class NotchViewModel: ObservableObject {
     /// The chat session we're viewing (persists across close/open)
     private var currentChatSession: SessionState?
 
+    /// Check if point is in the expanded wings area (when showing activity)
+    private func isPointInExpandedArea(_ point: CGPoint) -> Bool {
+        let activityCoordinator = NotchActivityCoordinator.shared
+        guard activityCoordinator.expandingActivity.show else { return false }
+
+        // Calculate expansion width (matches NotchView.expansionWidth)
+        let notchRect = geometry.deviceNotchRect
+        let expansionWidth = 2 * max(0, notchRect.height - 12) + 20 + 18
+
+        // Expanded rect in screen coordinates
+        let totalWidth = notchRect.width + expansionWidth
+        let expandedRect = CGRect(
+            x: geometry.screenRect.midX - totalWidth / 2,
+            y: geometry.screenRect.maxY - notchRect.height,
+            width: totalWidth,
+            height: notchRect.height
+        )
+
+        return expandedRect.insetBy(dx: -10, dy: -5).contains(point)
+    }
+
     private func handleMouseMove(_ location: CGPoint) {
-        let inNotch = geometry.isPointInNotch(location)
+        let inNotch = geometry.isPointInNotch(location) || isPointInExpandedArea(location)
         let inOpened = status == .opened && geometry.isPointInOpenedPanel(location, size: openedSize)
 
         let newHovering = inNotch || inOpened
@@ -170,7 +191,7 @@ class NotchViewModel: ObservableObject {
                 }
             }
         case .closed, .popping:
-            if geometry.isPointInNotch(location) {
+            if geometry.isPointInNotch(location) || isPointInExpandedArea(location) {
                 notchOpen(reason: .click)
             }
         }

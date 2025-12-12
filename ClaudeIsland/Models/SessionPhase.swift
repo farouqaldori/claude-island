@@ -147,7 +147,7 @@ enum SessionPhase: Sendable {
     }
 
     /// Whether this phase indicates active processing
-    var isActive: Bool {
+    nonisolated var isActive: Bool {
         switch self {
         case .processing, .compacting:
             return true

@@ -5,12 +5,43 @@
 //  Unix domain socket server for real-time hook events
 //  Supports request/response for permission decisions
 //
+//  Security improvements:
+//  - Socket in ~/Library/Application Support (not world-writable /tmp)
+//  - Token-based authentication
+//  - Strict file permissions (0600)
+//
 
 import Foundation
 import os.log
 
 /// Logger for hook socket server
 private let logger = Logger(subsystem: "com.claudeisland", category: "Hooks")
+
+/// Security configuration for the socket server
+private enum SecurityConfig {
+    /// Application support directory for secure storage
+    static var appSupportDir: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("ClaudeIsland")
+    }
+
+    /// Secure socket path
+    static var socketPath: String {
+        appSupportDir.appendingPathComponent("claude-island.sock").path
+    }
+
+    /// Auth token file path
+    static var tokenPath: URL {
+        appSupportDir.appendingPathComponent("auth-token")
+    }
+
+    /// Generate a cryptographically secure random token
+    static func generateToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+}
 
 /// Event received from Claude Code hooks
 struct HookEvent: Codable, Sendable {
@@ -25,6 +56,7 @@ struct HookEvent: Codable, Sendable {
     let toolUseId: String?
     let notificationType: String?
     let message: String?
+    let authToken: String?  // Security: authentication token
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -33,10 +65,11 @@ struct HookEvent: Codable, Sendable {
         case toolUseId = "tool_use_id"
         case notificationType = "notification_type"
         case message
+        case authToken = "_auth_token"
     }
 
     /// Create a copy with updated toolUseId
-    init(sessionId: String, cwd: String, event: String, status: String, pid: Int?, tty: String?, tool: String?, toolInput: [String: AnyCodable]?, toolUseId: String?, notificationType: String?, message: String?) {
+    init(sessionId: String, cwd: String, event: String, status: String, pid: Int?, tty: String?, tool: String?, toolInput: [String: AnyCodable]?, toolUseId: String?, notificationType: String?, message: String?, authToken: String? = nil) {
         self.sessionId = sessionId
         self.cwd = cwd
         self.event = event
@@ -48,6 +81,7 @@ struct HookEvent: Codable, Sendable {
         self.toolUseId = toolUseId
         self.notificationType = notificationType
         self.message = message
+        self.authToken = authToken
     }
 
     var sessionPhase: SessionPhase {
@@ -105,15 +139,18 @@ typealias PermissionFailureHandler = @Sendable (_ sessionId: String, _ toolUseId
 
 /// Unix domain socket server that receives events from Claude Code hooks
 /// Uses GCD DispatchSource for non-blocking I/O
+/// Security: Token authentication, strict permissions, secure socket path
 class HookSocketServer {
     static let shared = HookSocketServer()
-    static let socketPath = "/tmp/claude-island.sock"
 
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var eventHandler: HookEventHandler?
     private var permissionFailureHandler: PermissionFailureHandler?
     private let queue = DispatchQueue(label: "com.claudeisland.socket", qos: .userInitiated)
+
+    /// Current auth token for this session
+    private var authToken: String?
 
     /// Pending permission requests indexed by toolUseId
     private var pendingPermissions: [String: PendingPermission] = [:]
@@ -127,6 +164,74 @@ class HookSocketServer {
 
     private init() {}
 
+    // MARK: - Security Setup
+
+    /// Create secure directory and generate auth token
+    private func setupSecurity() -> Bool {
+        let fm = FileManager.default
+
+        // Create Application Support directory with secure permissions
+        do {
+            try fm.createDirectory(
+                at: SecurityConfig.appSupportDir,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]  // Owner only
+            )
+        } catch {
+            logger.error("Failed to create secure directory: \(error.localizedDescription)")
+            return false
+        }
+
+        // Generate new auth token for this session
+        authToken = SecurityConfig.generateToken()
+
+        // Write token to file with strict permissions
+        do {
+            try authToken!.write(to: SecurityConfig.tokenPath, atomically: true, encoding: .utf8)
+            try fm.setAttributes(
+                [.posixPermissions: 0o600],  // Owner read/write only
+                ofItemAtPath: SecurityConfig.tokenPath.path
+            )
+            logger.info("Auth token written to secure file")
+        } catch {
+            logger.error("Failed to write auth token: \(error.localizedDescription)")
+            return false
+        }
+
+        return true
+    }
+
+    /// Validate incoming event has correct auth token
+    private func validateAuth(_ event: HookEvent) -> Bool {
+        guard let expectedToken = authToken else {
+            logger.warning("No auth token configured - rejecting event")
+            return false
+        }
+
+        guard let receivedToken = event.authToken else {
+            logger.warning("Event missing auth token from \(event.sessionId.prefix(8), privacy: .public)")
+            return false
+        }
+
+        // Constant-time comparison to prevent timing attacks
+        guard receivedToken.count == expectedToken.count else {
+            logger.warning("Auth token length mismatch from \(event.sessionId.prefix(8), privacy: .public)")
+            return false
+        }
+
+        var result: UInt8 = 0
+        for (a, b) in zip(receivedToken.utf8, expectedToken.utf8) {
+            result |= a ^ b
+        }
+
+        if result != 0 {
+            logger.warning("Invalid auth token from \(event.sessionId.prefix(8), privacy: .public)")
+            return false
+        }
+
+        return true
+    }
+
     /// Start the socket server
     func start(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler? = nil) {
         queue.async { [weak self] in
@@ -137,10 +242,17 @@ class HookSocketServer {
     private func startServer(onEvent: @escaping HookEventHandler, onPermissionFailure: PermissionFailureHandler?) {
         guard serverSocket < 0 else { return }
 
+        // Security: Setup secure directory and auth token FIRST
+        guard setupSecurity() else {
+            logger.error("Security setup failed - socket server not started")
+            return
+        }
+
         eventHandler = onEvent
         permissionFailureHandler = onPermissionFailure
 
-        unlink(Self.socketPath)
+        let socketPath = SecurityConfig.socketPath
+        unlink(socketPath)
 
         serverSocket = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverSocket >= 0 else {
@@ -153,7 +265,7 @@ class HookSocketServer {
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
-        Self.socketPath.withCString { ptr in
+        socketPath.withCString { ptr in
             withUnsafeMutablePointer(to: &addr.sun_path) { pathPtr in
                 let pathBufferPtr = UnsafeMutableRawPointer(pathPtr)
                     .assumingMemoryBound(to: CChar.self)
@@ -174,7 +286,8 @@ class HookSocketServer {
             return
         }
 
-        chmod(Self.socketPath, 0o777)
+        // Security: Set socket permissions to owner only (0600)
+        chmod(socketPath, 0o600)
 
         guard listen(serverSocket, 10) == 0 else {
             logger.error("Failed to listen: \(errno)")
@@ -183,7 +296,7 @@ class HookSocketServer {
             return
         }
 
-        logger.info("Listening on \(Self.socketPath, privacy: .public)")
+        logger.info("Secure socket listening on \(socketPath, privacy: .public)")
 
         acceptSource = DispatchSource.makeReadSource(fileDescriptor: serverSocket, queue: queue)
         acceptSource?.setEventHandler { [weak self] in
@@ -202,7 +315,11 @@ class HookSocketServer {
     func stop() {
         acceptSource?.cancel()
         acceptSource = nil
-        unlink(Self.socketPath)
+        unlink(SecurityConfig.socketPath)
+
+        // Clean up auth token file
+        try? FileManager.default.removeItem(at: SecurityConfig.tokenPath)
+        authToken = nil
 
         permissionsLock.lock()
         for (_, pending) in pendingPermissions {
@@ -411,7 +528,14 @@ class HookSocketServer {
             return
         }
 
-        logger.debug("Received: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
+        // Security: Validate auth token before processing
+        guard validateAuth(event) else {
+            logger.warning("Rejected unauthenticated event from \(event.sessionId.prefix(8), privacy: .public)")
+            close(clientSocket)
+            return
+        }
+
+        logger.debug("Received authenticated event: \(event.event, privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
 
         if event.event == "PreToolUse" {
             cacheToolUseId(event: event)

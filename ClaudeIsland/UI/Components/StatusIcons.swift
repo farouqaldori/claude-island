@@ -215,6 +215,54 @@ struct IdleIcon: View {
     }
 }
 
+// MARK: - Completed Unseen Icon (checkmark)
+struct CompletedUnseenIcon: View {
+    let size: CGFloat
+    let color: Color
+
+    init(size: CGFloat = 12, color: Color = TerminalColors.green) {
+        self.size = size
+        self.color = color
+    }
+
+    // Higher resolution grid (60x60) for smoother appearance, same visual size
+    private let pixels: [(CGFloat, CGFloat)] = [
+        // Short arm (left side going down-right)
+        (8, 26),
+        (12, 30),
+        (16, 34),
+        // Bottom turning point
+        (20, 38),
+        (24, 42),
+        // Long arm (going up-right) - extended
+        (28, 38),
+        (32, 34),
+        (36, 30),
+        (40, 26),
+        (44, 22),
+        (48, 18),
+        (52, 14),
+    ]
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let scale = size / 60.0  // Higher resolution grid
+            let pixelSize: CGFloat = 8 * scale  // Proportionally larger dots (same visual size as 4/30)
+
+            for (x, y) in pixels {
+                let rect = CGRect(
+                    x: x * scale - pixelSize / 2,
+                    y: y * scale - pixelSize / 2,
+                    width: pixelSize,
+                    height: pixelSize
+                )
+                context.fill(Path(rect), with: .color(color))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 // MARK: - Status Icon View (unified)
 struct StatusIcon: View {
     let phase: SessionPhase
