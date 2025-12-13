@@ -50,6 +50,7 @@ class NotchViewModel: ObservableObject {
 
     private let screenSelector = ScreenSelector.shared
     private let soundSelector = SoundSelector.shared
+    private let notchStyleSelector = NotchStyleSelector.shared
 
     // MARK: - Geometry
 
@@ -74,7 +75,7 @@ class NotchViewModel: ObservableObject {
             // Compact size for settings menu
             return CGSize(
                 width: min(screenRect.width * 0.4, 480),
-                height: 420 + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
+                height: 420 + notchStyleSelector.expandedPickerHeight + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
             )
         case .instances:
             return CGSize(
@@ -110,6 +111,10 @@ class NotchViewModel: ObservableObject {
     }
 
     private func observeSelectors() {
+        notchStyleSelector.$isPickerExpanded
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
         screenSelector.$isPickerExpanded
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)

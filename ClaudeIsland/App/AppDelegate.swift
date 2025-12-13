@@ -4,6 +4,10 @@ import Mixpanel
 import Sparkle
 import SwiftUI
 
+extension Notification.Name {
+    static let notchStyleChanged = Notification.Name("notchStyleChanged")
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
     private var screenObserver: ScreenObserver?
@@ -77,6 +81,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleScreenChange()
         }
 
+        NotificationCenter.default.addObserver(
+            forName: .notchStyleChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleNotchStyleChange()
+        }
+
         if updater.canCheckForUpdates {
             updater.checkForUpdates()
         }
@@ -89,6 +101,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleScreenChange() {
         _ = windowManager?.setupNotchWindow()
+    }
+
+    private func handleNotchStyleChange() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            _ = self?.windowManager?.setupNotchWindow()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
