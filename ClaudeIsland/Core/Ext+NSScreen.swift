@@ -7,27 +7,65 @@
 
 import AppKit
 
+enum NotchStyle: String, Codable, CaseIterable {
+    case `default`
+    case neat
+
+    var displayName: String {
+        switch self {
+        case .default: return "Default"
+        case .neat: return "Neat"
+        }
+    }
+
+    var sublabel: String {
+        switch self {
+        case .default: return "Physical Notch"
+        case .neat: return "Menu Bar Height"
+        }
+    }
+}
+
 extension NSScreen {
+    static let menuBarHeight: CGFloat = 25
+
     /// Returns the size of the notch on this screen (pixel-perfect using macOS APIs)
     var notchSize: CGSize {
-        guard safeAreaInsets.top > 0 else {
-            // Fallback for non-notch displays (matches typical MacBook notch)
-            return CGSize(width: 224, height: 38)
+        notchSize(for: .default)
+    }
+
+    /// Returns the size of the notch for a given style
+    func notchSize(for style: NotchStyle) -> CGSize {
+        switch style {
+        case .neat:
+            let fullWidth = frame.width
+            let leftPadding = auxiliaryTopLeftArea?.width ?? 0
+            let rightPadding = auxiliaryTopRightArea?.width ?? 0
+
+            if leftPadding > 0, rightPadding > 0 {
+                let notchWidth = fullWidth - leftPadding - rightPadding + 4
+                return CGSize(width: notchWidth, height: NSScreen.menuBarHeight)
+            } else {
+                return CGSize(width: 180, height: NSScreen.menuBarHeight)
+            }
+
+        case .default:
+            guard safeAreaInsets.top > 0 else {
+                return CGSize(width: 224, height: 38)
+            }
+
+            let notchHeight = safeAreaInsets.top
+            let fullWidth = frame.width
+            let leftPadding = auxiliaryTopLeftArea?.width ?? 0
+            let rightPadding = auxiliaryTopRightArea?.width ?? 0
+
+            guard leftPadding > 0, rightPadding > 0 else {
+                return CGSize(width: 180, height: notchHeight)
+            }
+
+            let notchWidth = fullWidth - leftPadding - rightPadding + 4
+            return CGSize(width: notchWidth, height: notchHeight)
         }
-
-        let notchHeight = safeAreaInsets.top
-        let fullWidth = frame.width
-        let leftPadding = auxiliaryTopLeftArea?.width ?? 0
-        let rightPadding = auxiliaryTopRightArea?.width ?? 0
-
-        guard leftPadding > 0, rightPadding > 0 else {
-            // Fallback if auxiliary areas unavailable
-            return CGSize(width: 180, height: notchHeight)
-        }
-
-        // +4 to match boring.notch's calculation for proper alignment
-        let notchWidth = fullWidth - leftPadding - rightPadding + 4
-        return CGSize(width: notchWidth, height: notchHeight)
     }
 
     /// Whether this is the built-in display

@@ -16,6 +16,7 @@ import Sparkle
 struct NotchMenuView: View {
     @ObservedObject var viewModel: NotchViewModel
     @ObservedObject private var updateManager = UpdateManager.shared
+    @ObservedObject private var notchStyleSelector = NotchStyleSelector.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
     @ObservedObject private var soundSelector = SoundSelector.shared
     @State private var hooksInstalled: Bool = false
@@ -36,6 +37,7 @@ struct NotchMenuView: View {
                 .padding(.vertical, 4)
 
             // Appearance settings
+            NotchStylePickerRow(notchStyleSelector: notchStyleSelector)
             ScreenPickerRow(screenSelector: screenSelector)
             SoundPickerRow(soundSelector: soundSelector)
 

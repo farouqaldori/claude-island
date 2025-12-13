@@ -9,10 +9,16 @@ import AppKit
 import CoreGraphics
 import SwiftUI
 
-// Corner radius constants
-private let cornerRadiusInsets = (
+// Corner radius constants for default (physical notch)
+private let cornerRadiusInsetsDefault = (
     opened: (top: CGFloat(19), bottom: CGFloat(24)),
     closed: (top: CGFloat(6), bottom: CGFloat(14))
+)
+
+// Corner radius constants for neat (menu bar height)
+private let cornerRadiusInsetsNeat = (
+    opened: (top: CGFloat(19), bottom: CGFloat(24)),
+    closed: (top: CGFloat(4), bottom: CGFloat(8))
 )
 
 struct NotchView: View {
@@ -108,6 +114,10 @@ struct NotchView: View {
 
     // MARK: - Corner Radii
 
+    private var cornerRadiusInsets: (opened: (top: CGFloat, bottom: CGFloat), closed: (top: CGFloat, bottom: CGFloat)) {
+        AppSettings.notchStyle == .neat ? cornerRadiusInsetsNeat : cornerRadiusInsetsDefault
+    }
+
     private var topCornerRadius: CGFloat {
         viewModel.status == .opened
             ? cornerRadiusInsets.opened.top
@@ -176,11 +186,6 @@ struct NotchView: View {
                     .onHover { hovering in
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
                             isHovering = hovering
-                        }
-                    }
-                    .onTapGesture {
-                        if viewModel.status != .opened {
-                            viewModel.notchOpen(reason: .click)
                         }
                     }
             }
