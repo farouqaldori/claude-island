@@ -142,11 +142,14 @@ struct NotchView: View {
                         maxWidth: viewModel.status == .opened ? notchSize.width : nil,
                         alignment: .top
                     )
+                    // IMPORTANT: Visual padding affects hit detection in NotchViewController.swift
+                    // Changes to these padding values may require updating
+                    // HitTestPadding constants in NotchViewController.swift
                     .padding(
                         .horizontal,
                         viewModel.status == .opened
-                            ? cornerRadiusInsets.opened.top
-                            : cornerRadiusInsets.closed.bottom
+                            ? cornerRadiusInsets.opened.top  // 19
+                            : cornerRadiusInsets.closed.bottom  // 14
                     )
                     .padding([.horizontal, .bottom], viewModel.status == .opened ? 12 : 0)
                     .background(.black)
@@ -163,7 +166,7 @@ struct NotchView: View {
                     )
                     .frame(
                         maxWidth: viewModel.status == .opened ? notchSize.width : nil,
-                        maxHeight: viewModel.status == .opened ? notchSize.height : nil,
+                        maxHeight: viewModel.status == .opened ? notchSize.height + 80 : nil,
                         alignment: .top
                     )
                     .animation(viewModel.status == .opened ? openAnimation : closeAnimation, value: viewModel.status)
