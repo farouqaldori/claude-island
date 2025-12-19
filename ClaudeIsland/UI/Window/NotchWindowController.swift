@@ -14,7 +14,7 @@ class NotchWindowController: NSWindowController {
     private let screen: NSScreen
     private var cancellables = Set<AnyCancellable>()
 
-    init(screen: NSScreen) {
+    init(screen: NSScreen, animateOnLaunch: Bool = true) {
         self.screen = screen
 
         let screenFrame = screen.frame
@@ -86,9 +86,11 @@ class NotchWindowController: NSWindowController {
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
 
-        // Perform boot animation after a brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.viewModel.performBootAnimation()
+        // Perform boot animation after a brief delay (only on initial launch)
+        if animateOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.viewModel.performBootAnimation()
+            }
         }
     }
 
