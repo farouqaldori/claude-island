@@ -10,6 +10,11 @@ import AppKit
 class ScreenObserver {
     private var observer: Any?
     private let onScreenChange: () -> Void
+    private var pendingWork: DispatchWorkItem?
+
+    /// Debounce interval to coalesce rapid screen change notifications
+    /// (e.g., when waking from sleep, displays reconnect in stages)
+    private let debounceInterval: TimeInterval = 0.5
 
     init(onScreenChange: @escaping () -> Void) {
         self.onScreenChange = onScreenChange
@@ -26,11 +31,26 @@ class ScreenObserver {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.onScreenChange()
+            self?.scheduleScreenChange()
         }
     }
 
+    private func scheduleScreenChange() {
+        pendingWork?.cancel()
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.onScreenChange()
+        }
+        pendingWork = work
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + debounceInterval,
+            execute: work
+        )
+    }
+
     private func stopObserving() {
+        pendingWork?.cancel()
         if let observer = observer {
             NotificationCenter.default.removeObserver(observer)
         }
