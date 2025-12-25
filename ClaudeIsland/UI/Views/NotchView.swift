@@ -284,11 +284,13 @@ struct NotchView: View {
                     ProcessingSpinner()
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                        .padding(.trailing, viewModel.status == .opened ? 0 : 4)
                 } else if hasWaitingForInput {
                     // Checkmark for waiting-for-input on the right side
                     ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                        .padding(.trailing, viewModel.status == .opened ? 0 : 4)
                 }
             }
         }
