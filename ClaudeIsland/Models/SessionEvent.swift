@@ -67,8 +67,12 @@ enum SessionEvent: Sendable {
 
     // MARK: - Session Lifecycle
 
-    /// Session has ended
+    /// Session has ended (from Claude's SessionEnd hook - terminal process actually terminated)
     case sessionEnded(sessionId: String)
+
+    /// Session was archived by user (dismissed from UI, but terminal process may still be running)
+    /// These sessions can be re-detected if hook events continue to arrive
+    case sessionArchived(sessionId: String)
 
     /// Request to load initial history from file
     case loadHistory(sessionId: String, cwd: String)
@@ -199,6 +203,8 @@ extension SessionEvent: CustomStringConvertible {
             return "clearDetected(session: \(sessionId.prefix(8)))"
         case .sessionEnded(let sessionId):
             return "sessionEnded(session: \(sessionId.prefix(8)))"
+        case .sessionArchived(let sessionId):
+            return "sessionArchived(session: \(sessionId.prefix(8)))"
         case .loadHistory(let sessionId, _):
             return "loadHistory(session: \(sessionId.prefix(8)))"
         case .historyLoaded(let sessionId, let messages, _, _, _, _):

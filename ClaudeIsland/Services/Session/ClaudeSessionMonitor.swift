@@ -26,6 +26,23 @@ class ClaudeSessionMonitor: ObservableObject {
             .store(in: &cancellables)
 
         InterruptWatcherManager.shared.delegate = self
+
+        // Register callback for when archived sessions are re-detected
+        // This restarts the interrupt watcher when a user continues working in terminal
+        // after archiving the session from the app
+        Task {
+            await SessionStore.shared.setArchivedSessionRedetectedCallback { [weak self] sessionId, cwd in
+                Task { @MainActor in
+                    self?.handleArchivedSessionRedetected(sessionId: sessionId, cwd: cwd)
+                }
+            }
+        }
+    }
+
+    /// Handle re-detection of an archived session
+    /// Restart interrupt watcher since the user is continuing to work in terminal
+    private func handleArchivedSessionRedetected(sessionId: String, cwd: String) {
+        InterruptWatcherManager.shared.startWatching(sessionId: sessionId, cwd: cwd)
     }
 
     // MARK: - Monitoring Lifecycle
@@ -114,10 +131,13 @@ class ClaudeSessionMonitor: ObservableObject {
     }
 
     /// Archive (remove) a session from the instances list
+    /// The session can be re-detected if hook events continue to arrive from the terminal
     func archiveSession(sessionId: String) {
         Task {
-            await SessionStore.shared.process(.sessionEnded(sessionId: sessionId))
+            await SessionStore.shared.process(.sessionArchived(sessionId: sessionId))
         }
+        // Stop watching interrupts for archived session
+        InterruptWatcherManager.shared.stopWatching(sessionId: sessionId)
     }
 
     // MARK: - State Update

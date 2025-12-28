@@ -24,11 +24,18 @@ actor SessionStore {
     /// All sessions keyed by sessionId
     private var sessions: [String: SessionState] = [:]
 
+    /// Archived session IDs (user dismissed from UI, but terminal process may still be running)
+    /// These can be re-detected if hook events continue to arrive
+    private var archivedSessionIds: Set<String> = []
+
     /// Pending file syncs (debounced)
     private var pendingSyncs: [String: Task<Void, Never>] = [:]
 
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
+
+    /// Callback for when an archived session is re-detected (for restarting watchers)
+    private var onArchivedSessionRedetected: ((String, String) -> Void)?
 
     // MARK: - Published State (for UI)
 
@@ -75,6 +82,9 @@ actor SessionStore {
         case .sessionEnded(let sessionId):
             await processSessionEnd(sessionId: sessionId)
 
+        case .sessionArchived(let sessionId):
+            await processSessionArchived(sessionId: sessionId)
+
         case .loadHistory(let sessionId, let cwd):
             await loadHistoryFromFile(sessionId: sessionId, cwd: cwd)
 
@@ -118,11 +128,20 @@ actor SessionStore {
     private func processHookEvent(_ event: HookEvent) async {
         let sessionId = event.sessionId
         let isNewSession = sessions[sessionId] == nil
+        let wasArchived = archivedSessionIds.contains(sessionId)
         var session = sessions[sessionId] ?? createSession(from: event)
 
-        // Track new session in Mixpanel
-        if isNewSession {
+        // Track new session in Mixpanel (but not re-detected archived sessions)
+        if isNewSession && !wasArchived {
             Mixpanel.mainInstance().track(event: "Session Started")
+        }
+
+        // If this was an archived session being re-detected, remove from archived set
+        // and notify callback to restart watchers
+        if wasArchived {
+            archivedSessionIds.remove(sessionId)
+            Self.logger.info("Re-detected archived session: \(sessionId.prefix(8), privacy: .public)")
+            onArchivedSessionRedetected?(sessionId, event.cwd)
         }
 
         session.pid = event.pid
@@ -841,9 +860,20 @@ actor SessionStore {
 
     // MARK: - Session End Processing
 
+    /// Process a true session end (from Claude's SessionEnd hook - terminal process terminated)
     private func processSessionEnd(sessionId: String) async {
         sessions.removeValue(forKey: sessionId)
+        archivedSessionIds.remove(sessionId)  // Also remove from archived if present
         cancelPendingSync(sessionId: sessionId)
+    }
+
+    /// Process a session archive (user dismissed from UI, but terminal process may still be running)
+    /// The session is tracked so it can be re-detected if hook events continue to arrive
+    private func processSessionArchived(sessionId: String) async {
+        archivedSessionIds.insert(sessionId)
+        sessions.removeValue(forKey: sessionId)
+        cancelPendingSync(sessionId: sessionId)
+        Self.logger.info("Session archived (can be re-detected): \(sessionId.prefix(8), privacy: .public)")
     }
 
     // MARK: - History Loading
@@ -986,5 +1016,13 @@ actor SessionStore {
     /// Get all current sessions
     func allSessions() -> [SessionState] {
         Array(sessions.values)
+    }
+
+    // MARK: - Callback Registration
+
+    /// Set callback for when an archived session is re-detected
+    /// The callback receives (sessionId, cwd) and can be used to restart watchers
+    func setArchivedSessionRedetectedCallback(_ callback: @escaping (String, String) -> Void) {
+        onArchivedSessionRedetected = callback
     }
 }
