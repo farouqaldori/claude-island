@@ -9,6 +9,29 @@
 import Foundation
 import os.log
 
+/// Token usage information from a session
+struct UsageInfo: Equatable {
+    var inputTokens: Int = 0
+    var outputTokens: Int = 0
+    var cacheReadTokens: Int = 0
+    var cacheCreationTokens: Int = 0
+
+    var totalTokens: Int {
+        inputTokens + outputTokens
+    }
+
+    /// Formatted string for display (e.g., "12.5K tokens")
+    var formattedTotal: String {
+        let total = totalTokens
+        if total >= 1_000_000 {
+            return String(format: "%.1fM", Double(total) / 1_000_000)
+        } else if total >= 1_000 {
+            return String(format: "%.1fK", Double(total) / 1_000)
+        }
+        return "\(total)"
+    }
+}
+
 struct ConversationInfo: Equatable {
     let summary: String?
     let lastMessage: String?
@@ -16,6 +39,7 @@ struct ConversationInfo: Equatable {
     let lastToolName: String?  // Tool name if lastMessageRole is "tool"
     let firstUserMessage: String?  // Fallback title when no summary
     let lastUserMessageDate: Date?  // Timestamp of last user message (for stable sorting)
+    var usage: UsageInfo = UsageInfo()  // Token usage stats
 }
 
 actor ConversationParser {
@@ -107,9 +131,27 @@ actor ConversationParser {
         var lastToolName: String?
         var firstUserMessage: String?
         var lastUserMessageDate: Date?
+        var usage = UsageInfo()
 
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        // First pass: collect usage from all assistant messages
+        for line in lines {
+            guard let lineData = line.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                continue
+            }
+
+            if json["type"] as? String == "assistant",
+               let message = json["message"] as? [String: Any],
+               let usageDict = message["usage"] as? [String: Any] {
+                usage.inputTokens += usageDict["input_tokens"] as? Int ?? 0
+                usage.outputTokens += usageDict["output_tokens"] as? Int ?? 0
+                usage.cacheReadTokens += usageDict["cache_read_input_tokens"] as? Int ?? 0
+                usage.cacheCreationTokens += usageDict["cache_creation_input_tokens"] as? Int ?? 0
+            }
+        }
 
         for line in lines {
             guard let lineData = line.data(using: .utf8),
@@ -201,7 +243,8 @@ actor ConversationParser {
             lastMessageRole: lastMessageRole,
             lastToolName: lastToolName,
             firstUserMessage: firstUserMessage,
-            lastUserMessageDate: lastUserMessageDate
+            lastUserMessageDate: lastUserMessageDate,
+            usage: usage
         )
     }
 

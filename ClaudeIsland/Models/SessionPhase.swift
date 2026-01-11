@@ -18,24 +18,38 @@ struct PermissionContext: Sendable {
     /// Format tool input for display
     var formattedInput: String? {
         guard let input = toolInput else { return nil }
-        var parts: [String] = []
-        for (key, value) in input {
-            let valueStr: String
-            switch value.value {
-            case let str as String:
-                valueStr = str.count > 100 ? String(str.prefix(100)) + "..." : str
-            case let num as Int:
-                valueStr = String(num)
-            case let num as Double:
-                valueStr = String(num)
-            case let bool as Bool:
-                valueStr = bool ? "true" : "false"
-            default:
-                valueStr = "..."
-            }
-            parts.append("\(key): \(valueStr)")
+
+        // For Bash, prioritize showing the command
+        if toolName == "Bash", let command = input["command"]?.value as? String {
+            return command.count > 100 ? String(command.prefix(100)) + "..." : command
         }
-        return parts.joined(separator: "\n")
+
+        // For Write/Edit, show the file path
+        if toolName == "Write" || toolName == "Edit", let path = input["file_path"]?.value as? String {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+
+        // For Read, show the file path
+        if toolName == "Read", let path = input["file_path"]?.value as? String {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+
+        // Default: show first string value found (skip description)
+        let priorityKeys = ["command", "file_path", "path", "query", "pattern", "url"]
+        for key in priorityKeys {
+            if let value = input[key]?.value as? String {
+                return value.count > 100 ? String(value.prefix(100)) + "..." : value
+            }
+        }
+
+        // Fallback: first non-description string
+        for (key, value) in input where key != "description" {
+            if let str = value.value as? String {
+                return str.count > 100 ? String(str.prefix(100)) + "..." : str
+            }
+        }
+
+        return nil
     }
 }
 

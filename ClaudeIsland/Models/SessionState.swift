@@ -179,6 +179,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
         conversationInfo.lastUserMessageDate
     }
 
+    /// Token usage for this session
+    var usage: UsageInfo {
+        conversationInfo.usage
+    }
+
     /// Whether the session can be interacted with
     var canInteract: Bool {
         phase.needsAttention
