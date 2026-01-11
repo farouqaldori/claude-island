@@ -30,6 +30,12 @@ actor SessionStore {
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
 
+    /// Periodic status check task
+    private var statusCheckTask: Task<Void, Never>?
+
+    /// Status check interval (3 seconds)
+    private let statusCheckIntervalSeconds: UInt64 = 3
+
     // MARK: - Published State (for UI)
 
     /// Publisher for session state changes (nonisolated for Combine subscription from any context)
@@ -958,6 +964,72 @@ actor SessionStore {
     private func cancelPendingSync(sessionId: String) {
         pendingSyncs[sessionId]?.cancel()
         pendingSyncs.removeValue(forKey: sessionId)
+    }
+
+    // MARK: - Periodic Status Check
+
+    /// Start periodic status checking for all sessions
+    func startPeriodicStatusCheck() {
+        guard statusCheckTask == nil else { return }
+
+        let intervalSeconds = statusCheckIntervalSeconds
+        statusCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: intervalSeconds * 1_000_000_000)
+                guard !Task.isCancelled else { break }
+                await self?.recheckAllSessions()
+            }
+        }
+        Self.logger.info("Started periodic status check (every \(intervalSeconds)s)")
+    }
+
+    /// Stop periodic status checking
+    func stopPeriodicStatusCheck() {
+        statusCheckTask?.cancel()
+        statusCheckTask = nil
+        Self.logger.info("Stopped periodic status check")
+    }
+
+    /// Recheck status of all active sessions
+    private func recheckAllSessions() {
+        for (sessionId, session) in sessions {
+            // Skip ended sessions
+            guard session.phase != .ended else { continue }
+
+            // Check if process is still running
+            if let pid = session.pid {
+                let isRunning = isProcessRunning(pid: pid)
+                if !isRunning {
+                    // Process died - mark session as ended
+                    Self.logger.info("Process \(pid) no longer running, ending session \(sessionId.prefix(8))")
+                    var updatedSession = session
+                    if updatedSession.phase.canTransition(to: .ended) {
+                        updatedSession.phase = .ended
+                        sessions[sessionId] = updatedSession
+                        publishState()
+                    }
+                    continue
+                }
+            }
+
+            // For active sessions, trigger a file sync to refresh state
+            let needsSync: Bool
+            switch session.phase {
+            case .processing, .waitingForApproval:
+                needsSync = true
+            default:
+                needsSync = false
+            }
+            if needsSync {
+                scheduleFileSync(sessionId: sessionId, cwd: session.cwd)
+            }
+        }
+    }
+
+    /// Check if a process is still running
+    private nonisolated func isProcessRunning(pid: Int) -> Bool {
+        // kill(pid, 0) returns 0 if process exists, -1 otherwise
+        return kill(Int32(pid), 0) == 0
     }
 
     // MARK: - State Publishing
