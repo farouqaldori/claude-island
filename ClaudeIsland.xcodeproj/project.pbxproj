@@ -10,6 +10,7 @@
 		FD0F42E72EE7ABA400980302 /* Mixpanel in Frameworks */ = {isa = PBXBuildFile; productRef = FD0F42E62EE7ABA400980302 /* Mixpanel */; };
 		FDA49F7D2EE11E3C00F9612E /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = FD33FD722EDF32D7002A6548 /* Markdown */; };
 		FDA49F7E2EE11E3C00F9612E /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = FDA49F7F2EE11E3C00F9612E /* Sparkle */; };
+		FDOCCLUS012EEF0A0000001 /* OcclusionKit in Frameworks */ = {isa = PBXBuildFile; productRef = FDOCCLUS022EEF0A0000002 /* OcclusionKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,6 +46,7 @@
 				FD0F42E72EE7ABA400980302 /* Mixpanel in Frameworks */,
 				FDA49F7D2EE11E3C00F9612E /* Markdown in Frameworks */,
 				FDA49F7E2EE11E3C00F9612E /* Sparkle in Frameworks */,
+				FDOCCLUS012EEF0A0000001 /* OcclusionKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -90,6 +92,7 @@
 				FD33FD722EDF32D7002A6548 /* Markdown */,
 				FDA49F7F2EE11E3C00F9612E /* Sparkle */,
 				FD0F42E62EE7ABA400980302 /* Mixpanel */,
+				FDOCCLUS022EEF0A0000002 /* OcclusionKit */,
 			);
 			productName = ClaudeIsland;
 			productReference = FD33FD5D2EDF32D7002A6548 /* Claude Island.app */;
@@ -123,6 +126,7 @@
 				FD33FD712EDF32D7002A6548 /* XCRemoteSwiftPackageReference "swift-markdown" */,
 				FDA49F802EE11E3C00F9612E /* XCRemoteSwiftPackageReference "Sparkle" */,
 				FD0F42E52EE7ABA400980302 /* XCRemoteSwiftPackageReference "mixpanel-swift" */,
+				FDOCCLUS032EEF0A0000003 /* XCLocalSwiftPackageReference "OcclusionKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FD33FD5E2EDF32D7002A6548 /* Products */;
@@ -393,7 +397,16 @@
 				minimumVersion = 2.0.0;
 			};
 		};
+		FDOCCLUS032EEF0A0000003 /* XCRemoteSwiftPackageReference "OcclusionKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/akdoan1/OcclusionKit";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
+
 
 /* Begin XCSwiftPackageProductDependency section */
 		FD0F42E62EE7ABA400980302 /* Mixpanel */ = {
@@ -410,6 +423,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FDA49F802EE11E3C00F9612E /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		FDOCCLUS022EEF0A0000002 /* OcclusionKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FDOCCLUS032EEF0A0000003 /* XCRemoteSwiftPackageReference "OcclusionKit" */;
+			productName = OcclusionKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -7,29 +7,9 @@
 
 import AppKit
 import CoreGraphics
+import OcclusionKit
 
 struct TerminalVisibilityDetector {
-    /// Check if any terminal window is visible on the current space
-    static func isTerminalVisibleOnCurrentSpace() -> Bool {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-
-        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return false
-        }
-
-        for window in windowList {
-            guard let ownerName = window[kCGWindowOwnerName as String] as? String,
-                  let layer = window[kCGWindowLayer as String] as? Int,
-                  layer == 0 else { continue }
-
-            if TerminalAppRegistry.isTerminal(ownerName) {
-                return true
-            }
-        }
-
-        return false
-    }
-
     /// Check if the frontmost (active) application is a terminal
     static func isTerminalFrontmost() -> Bool {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication,
@@ -38,6 +18,37 @@ struct TerminalVisibilityDetector {
         }
 
         return TerminalAppRegistry.isTerminalBundle(bundleId)
+    }
+
+    /// Check if a Claude session's terminal window is visible on the current space
+    /// - Parameter sessionPid: The PID of the Claude process
+    /// - Returns: true if the session's terminal has a visible, unobscured window on the current space
+    static func isSessionTerminalVisible(sessionPid: Int) async -> Bool {
+        let tree = ProcessTreeBuilder.shared.buildTree()
+
+        // Get all on-screen windows using OcclusionKit
+        guard let windows = try? OcclusionKit.allWindows() else {
+            return false
+        }
+
+        // Find the terminal window for this session and check if it's visible
+        for window in windows where window.isNormalLayer {
+            let ownerPid = Int(window.processID)
+
+            // Check if this window belongs to the session's terminal
+            if ProcessTreeBuilder.shared.isDescendant(targetPid: sessionPid, ofAncestor: ownerPid, tree: tree) {
+                // Found the terminal window - check if it's mostly visible using OcclusionKit
+                // OcclusionKit uses accurate region subtraction (no overcounting)
+                do {
+                    let isOccluded = try await OcclusionKit.isOccluded(window.id, threshold: 0.5)
+                    return !isOccluded
+                } catch {
+                    return false
+                }
+            }
+        }
+
+        return false
     }
 
     /// Check if a Claude session is currently focused (user is looking at it)
@@ -56,13 +67,15 @@ struct TerminalVisibilityDetector {
             // For tmux sessions, check if the session's pane is active
             return await TmuxTargetFinder.shared.isSessionPaneActive(claudePid: sessionPid)
         } else {
-            // For non-tmux sessions, check if the session's terminal app is frontmost
-            guard let sessionTerminalPid = ProcessTreeBuilder.shared.findTerminalPid(forProcess: sessionPid, tree: tree),
-                  let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            // For non-tmux sessions, check if the session is a descendant of the frontmost app
+            // This handles terminal architectures where child processes (like iTermServer or Warp's
+            // terminal-server) run the shell, but the main app process is what's reported as frontmost
+            guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
                 return false
             }
 
-            return sessionTerminalPid == Int(frontmostApp.processIdentifier)
+            let frontmostPid = Int(frontmostApp.processIdentifier)
+            return ProcessTreeBuilder.shared.isDescendant(targetPid: sessionPid, ofAncestor: frontmostPid, tree: tree)
         }
     }
 }

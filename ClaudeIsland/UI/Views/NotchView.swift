@@ -419,10 +419,31 @@ struct NotchView: View {
         let currentIds = Set(sessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
-            viewModel.notchOpen(reason: .notification)
+        if !newPendingIds.isEmpty && viewModel.status == .closed {
+            // Get the new pending sessions and check if any of their terminals are NOT visible
+            let newPendingSessions = sessions.filter { newPendingIds.contains($0.stableId) }
+
+            // Check visibility asynchronously
+            Task {
+                var anySessionTerminalNotVisible = false
+                for session in newPendingSessions {
+                    guard let pid = session.pid else {
+                        anySessionTerminalNotVisible = true
+                        break
+                    }
+                    let isVisible = await TerminalVisibilityDetector.isSessionTerminalVisible(sessionPid: pid)
+                    if !isVisible {
+                        anySessionTerminalNotVisible = true
+                        break
+                    }
+                }
+
+                if anySessionTerminalNotVisible {
+                    await MainActor.run {
+                        viewModel.notchOpen(reason: .notification)
+                    }
+                }
+            }
         }
 
         previousPendingIds = currentIds
@@ -484,18 +505,25 @@ struct NotchView: View {
     }
 
     /// Determine if notification sound should play for the given sessions
-    /// Returns true if ANY session is not actively focused
+    /// Returns true if sound should play, false if suppressed
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
-        for session in sessions {
-            guard let pid = session.pid else {
-                // No PID means we can't check focus, assume not focused
-                return true
-            }
+        let mode = AppSettings.soundSuppression
 
-            let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
-            if !isFocused {
-                return true
-            }
+        // Never suppress - always play
+        if mode == .never { return true }
+
+        // Suppress if Claude Island is active (menu/chat open)
+        if NSApplication.shared.isActive { return false }
+
+        // Check each triggering session - play if ANY is not visible/focused
+        for session in sessions {
+            guard let pid = session.pid else { return true }
+
+            let shouldSuppress = mode == .whenVisible
+                ? await TerminalVisibilityDetector.isSessionTerminalVisible(sessionPid: pid)
+                : await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
+
+            if !shouldSuppress { return true }
         }
 
         return false

@@ -31,6 +31,21 @@ enum NotificationSound: String, CaseIterable {
     }
 }
 
+/// Sound suppression modes
+enum SoundSuppression: String, CaseIterable {
+    case never = "Never"
+    case whenFocused = "When Focused"
+    case whenVisible = "When Visible"
+
+    var description: String {
+        switch self {
+        case .never: return "Always play sounds"
+        case .whenFocused: return "Suppress when app or session is active"
+        case .whenVisible: return "Suppress when app or session is visible"
+        }
+    }
+}
+
 enum AppSettings {
     private static let defaults = UserDefaults.standard
 
@@ -38,6 +53,7 @@ enum AppSettings {
 
     private enum Keys {
         static let notificationSound = "notificationSound"
+        static let soundSuppression = "soundSuppression"
     }
 
     // MARK: - Notification Sound
@@ -53,6 +69,22 @@ enum AppSettings {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Keys.notificationSound)
+        }
+    }
+
+    // MARK: - Sound Suppression
+
+    /// When to suppress notification sounds based on app visibility/focus
+    static var soundSuppression: SoundSuppression {
+        get {
+            guard let rawValue = defaults.string(forKey: Keys.soundSuppression),
+                  let value = SoundSuppression(rawValue: rawValue) else {
+                return .whenFocused // Default
+            }
+            return value
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.soundSuppression)
         }
     }
 }
