@@ -16,13 +16,5 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2025. All rights reserved.</string>
-
-    <!-- Sparkle Update Configuration -->
-    <key>SUFeedURL</key>
-    <string>https://claudeisland.com/appcast.xml</string>
-    <key>SUPublicEDKey</key>
-    <string>w5NwH5KRfE7LfeZ09J8lWx3UQrWTqUbfH4HHBa1OPRk=</string>
-    <key>SUEnableAutomaticChecks</key>
-    <true/>
 </dict>
 </plist>
