@@ -102,6 +102,20 @@ Claude Island installs hooks into `~/.claude/hooks/` that communicate session st
 
 When Claude needs permission to run a tool, the notch expands with approve/deny buttons—no need to switch to the terminal.
 
+## Remote Sessions (SSH)
+
+Claude Island can monitor Claude Code sessions running on remote machines via NATS transport. The hook script auto-detects SSH sessions and falls back to NATS when the local Unix socket is unavailable.
+
+**How it works:**
+- The hook publishes events to a local NATS server (forwarded via SSH `RemoteForward`)
+- A bridge daemon on your Mac subscribes and forwards events to Claude Island
+- Permission approve/deny works bidirectionally via NATS request/reply
+- Message relay uses tmux proxy panes for sending keystrokes to remote sessions
+
+**Prerequisites:** NATS server on your Mac, SSH `RemoteForward 4222 localhost:4222`
+
+See [`scripts/remote/README.md`](scripts/remote/README.md) for full setup instructions.
+
 ## License
 
 Apache 2.0

@@ -10,6 +10,7 @@ For PermissionRequest events, waits for user decisions from the app.
 Requires: Python 3.14+
 """
 
+
 __all__ = [
     "HookEventData",
     "PermissionResponse",
@@ -19,12 +20,17 @@ __all__ = [
     "ToolInputType",
     "determine_status",
     "get_claude_pid",
+    "get_remote_hostname",
+    "get_remote_tmux_target",
     "get_tty",
     "handle_permission_response",
     "is_hook_event_data",
     "is_permission_response",
+    "is_remote",
     "is_session_active",
     "main",
+    "nats_publish",
+    "nats_request",
     "send_event",
     "validate_tty",
 ]
@@ -92,6 +98,121 @@ ToolInputType = dict[str, str | int | bool | list[str] | None]
 
 SOCKET_PATH = Path("/tmp/claude-island.sock")
 TIMEOUT_SECONDS = 300  # 5 minutes for permission decisions
+NATS_HOST = "localhost"
+NATS_PORT = 4222
+NATS_SUBJECT_STATE = "claude.island.state"
+NATS_SUBJECT_PERMISSION = "claude.island.permission"
+
+
+def is_remote():
+    """Detect if running in a remote SSH session"""
+    return bool(
+        os.environ.get("SSH_CLIENT")
+        or os.environ.get("SSH_TTY")
+        or os.environ.get("SSH_CONNECTION")
+    )
+
+
+def nats_publish(subject, payload):
+    """Publish a message via raw NATS protocol (no library needed)"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(5)
+        s.connect((NATS_HOST, NATS_PORT))
+        # Read server INFO
+        s.recv(4096)
+        # Send CONNECT
+        s.sendall(b"CONNECT {}\r\n")
+        # PUB subject length\r\npayload\r\n
+        data = payload.encode("utf-8")
+        s.sendall(f"PUB {subject} {len(data)}\r\n".encode())
+        s.sendall(data + b"\r\n")
+        s.sendall(b"PING\r\n")
+        s.recv(4096)  # wait for PONG to ensure delivery
+        s.close()
+    except Exception:
+        pass
+
+
+def nats_request(subject, payload, timeout=300):
+    """Send a NATS request and wait for reply (raw protocol, no library needed)"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((NATS_HOST, NATS_PORT))
+        # Read server INFO
+        s.recv(4096)
+        # Send CONNECT
+        s.sendall(b"CONNECT {}\r\n")
+        # Subscribe to a unique inbox for the reply
+        inbox = f"_INBOX.{os.getpid()}.{id(s)}"
+        s.sendall(f"SUB {inbox} 1\r\n".encode())
+        # PUB with reply-to
+        data = payload.encode("utf-8")
+        s.sendall(f"PUB {subject} {inbox} {len(data)}\r\n".encode())
+        s.sendall(data + b"\r\n")
+        s.sendall(b"PING\r\n")
+        # Read until we get a MSG
+        buf = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+            text = buf.decode("utf-8", errors="replace")
+            if "MSG " in text:
+                # Parse MSG inbox sid length\r\npayload\r\n
+                lines = text.split("\r\n")
+                for i, line in enumerate(lines):
+                    if line.startswith("MSG "):
+                        parts = line.split()
+                        msg_len = int(parts[-1])
+                        msg_payload = lines[i + 1][:msg_len]
+                        s.close()
+                        return json.loads(msg_payload)
+        s.close()
+    except Exception:
+        pass
+    return None
+
+
+def get_remote_tmux_target():
+    """Get tmux pane target on remote machine (only when in tmux)"""
+    if not os.environ.get("TMUX"):
+        return None
+    # Use TMUX_PANE to get THIS pane's target, not the active pane
+    tmux_pane = os.environ.get("TMUX_PANE")
+    import subprocess
+    try:
+        cmd = ["tmux", "display-message", "-p",
+               "#{session_name}:#{window_index}.#{pane_index}"]
+        if tmux_pane:
+            cmd = ["tmux", "display-message", "-t", tmux_pane, "-p",
+                   "#{session_name}:#{window_index}.#{pane_index}"]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=2,
+        )
+        target = result.stdout.strip()
+        if target:
+            return target
+    except Exception:
+        pass
+    return None
+
+
+def get_remote_hostname():
+    """Get FQDN of remote machine"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["hostname", "-f"], capture_output=True, text=True, timeout=2,
+        )
+        hostname = result.stdout.strip()
+        if hostname:
+            return hostname
+    except Exception:
+        pass
+    return None
 
 
 @dataclass(slots=True, frozen=True)
@@ -356,6 +477,9 @@ def send_event(state: SessionState, /) -> PermissionResponse | None:
                         return parsed
             return None
     except OSError, json.JSONDecodeError:
+        # Socket unavailable — fall back to NATS for remote sessions
+        if is_remote():
+            nats_publish(NATS_SUBJECT_STATE, json.dumps(state.to_dict()))
         return None
 
 
@@ -540,11 +664,32 @@ def main() -> None:
 
     # Handle permission requests specially
     if status == "waiting_for_approval":
-        response = send_event(state)
-        handle_permission_response(response)
-        sys.exit(0)
+        # Remote: use NATS request/reply for bidirectional approve/deny
+        if is_remote():
+            response_data = nats_request(
+                NATS_SUBJECT_PERMISSION, json.dumps(state.to_dict())
+            )
+            if response_data and is_permission_response(response_data):
+                handle_permission_response(response_data)
+            sys.exit(0)
+        else:
+            response = send_event(state)
+            handle_permission_response(response)
+            sys.exit(0)
+
+    # Add remote tmux info for state events (not permissions — those exit above)
+    # Bridge uses these to create proxy tmux panes for remote sessions
+    state_dict = state.to_dict()
+    if is_remote() and os.environ.get("TMUX"):
+        remote_target = get_remote_tmux_target()
+        remote_hostname = get_remote_hostname()
+        if remote_target:
+            state_dict["remote_tmux_target"] = remote_target
+        if remote_hostname:
+            state_dict["remote_hostname"] = remote_hostname
 
     # Send to socket (fire and forget for non-permission events)
+    # For remote sessions, send_event will fall back to NATS if socket unavailable
     _ = send_event(state)
 
 
