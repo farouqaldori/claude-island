@@ -1,0 +1,38 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  prek:
+    name: Pre-commit Checks
+    runs-on: macos-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install Swift tools
+        run: |
+          brew install swiftformat swiftlint shellcheck
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Run prek checks
+        uses: j178/prek-action@v1
+        with:
+          extra-args: --all-files --hook-stage manual
+        env:
+          SKIP: no-commit-to-branch

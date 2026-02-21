@@ -8,14 +8,8 @@
 import Foundation
 
 /// Represents a tmux target (session:window.pane)
-struct TmuxTarget: Sendable {
-    let session: String
-    let window: String
-    let pane: String
-
-    nonisolated var targetString: String {
-        "\(session):\(window).\(pane)"
-    }
+nonisolated struct TmuxTarget: Sendable {
+    // MARK: Lifecycle
 
     nonisolated init(session: String, window: String, pane: String) {
         self.session = session
@@ -37,5 +31,15 @@ struct TmuxTarget: Sendable {
         self.session = session
         self.window = String(paneSplit[0])
         self.pane = String(paneSplit[1])
+    }
+
+    // MARK: Internal
+
+    let session: String
+    let window: String
+    let pane: String
+
+    nonisolated var targetString: String {
+        "\(self.session):\(self.window).\(self.pane)"
     }
 }

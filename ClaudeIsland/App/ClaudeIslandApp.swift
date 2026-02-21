@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct ClaudeIslandApp: App {
+    // swiftlint:disable:next attributes
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {

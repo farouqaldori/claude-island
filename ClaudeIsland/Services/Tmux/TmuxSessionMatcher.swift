@@ -9,16 +9,20 @@ import Foundation
 
 /// Matches tmux panes to Claude session files by sampling pane content
 actor TmuxSessionMatcher {
-    static let shared = TmuxSessionMatcher()
+    // MARK: Lifecycle
 
     private init() {}
+
+    // MARK: Internal
+
+    static let shared = TmuxSessionMatcher()
 
     /// Find the session ID for a tmux pane by matching visible text to session files
     /// - Parameters:
     ///   - target: The tmux target (session:window.pane)
     ///   - projectDir: The project directory containing session files
     /// - Returns: The session ID if found with high confidence
-    func findSessionId(forTarget target: TmuxTarget, projectDir: URL) async -> String? {
+    func findSessionID(forTarget target: TmuxTarget, projectDir: URL) async -> String? {
         guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else {
             return nil
         }
@@ -27,43 +31,54 @@ actor TmuxSessionMatcher {
             return nil
         }
 
-        let snippets = extractSnippets(from: paneContent)
+        let snippets = self.extractSnippets(from: paneContent)
         guard snippets.count >= 2 else {
             return nil
         }
 
-        guard let sessionFiles = try? FileManager.default.contentsOfDirectory(
-            at: projectDir,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ).filter({ $0.pathExtension == "jsonl" && !$0.lastPathComponent.hasPrefix("agent-") }) else {
+        guard let sessionFiles = try? FileManager.default
+            .contentsOfDirectory(
+                at: projectDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles],
+            )
+            .filter({ $0.pathExtension == "jsonl" && !$0.lastPathComponent.hasPrefix("agent-") })
+        else {
             return nil
         }
 
-        var bestMatch: (sessionId: String, score: Int)?
+        var bestMatch: (sessionID: String, score: Int)?
 
-        for sessionUrl in sessionFiles {
-            let sessionId = sessionUrl.deletingPathExtension().lastPathComponent
-            let score = countMatchingSnippets(snippets: snippets, inFile: sessionUrl)
+        for sessionURL in sessionFiles {
+            let sessionID = sessionURL.deletingPathExtension().lastPathComponent
+            let score = self.countMatchingSnippets(snippets: snippets, inFile: sessionURL)
 
-            if score > 0 && (bestMatch == nil || score > bestMatch!.score) {
-                bestMatch = (sessionId, score)
+            if score > 0 {
+                if let existing = bestMatch {
+                    if score > existing.score {
+                        bestMatch = (sessionID, score)
+                    }
+                } else {
+                    bestMatch = (sessionID, score)
+                }
             }
         }
 
         if let match = bestMatch, match.score >= 2 {
-            return match.sessionId
+            return match.sessionID
         }
 
         return nil
     }
+
+    // MARK: Private
 
     // MARK: - Private Methods
 
     private func capturePaneContent(tmuxPath: String, target: TmuxTarget) async -> String? {
         do {
             let output = try await ProcessExecutor.shared.run(tmuxPath, arguments: [
-                "capture-pane", "-t", target.targetString, "-p", "-S", "-500"
+                "capture-pane", "-t", target.targetString, "-p", "-S", "-500",
             ])
             return output.isEmpty ? nil : output
         } catch {
@@ -85,14 +100,14 @@ actor TmuxSessionMatcher {
             if "+-|>⏺─━═[]{}()".contains(firstChar) { continue }
             if trimmed.hasPrefix("//") || trimmed.hasPrefix("/*") { continue }
 
-            let letterCount = trimmed.filter { $0.isLetter }.count
+            let letterCount = trimmed.filter(\.isLetter).count
             guard letterCount > trimmed.count / 3 else { continue }
 
             let snippet = String(trimmed.prefix(80))
             snippets.append(snippet)
         }
 
-        guard snippets.count > 0 else { return [] }
+        guard !snippets.isEmpty else { return [] }
 
         if snippets.count <= 5 {
             return snippets
@@ -108,14 +123,14 @@ actor TmuxSessionMatcher {
         return sampled
     }
 
-    private func countMatchingSnippets(snippets: [String], inFile fileUrl: URL) -> Int {
-        guard let handle = try? FileHandle(forReadingFrom: fileUrl) else {
+    private func countMatchingSnippets(snippets: [String], inFile fileURL: URL) -> Int {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
             return 0
         }
         defer { try? handle.close() }
 
         let fileSize = (try? handle.seekToEnd()) ?? 0
-        let readSize: UInt64 = min(100000, fileSize)
+        let readSize: UInt64 = min(100_000, fileSize)
         if fileSize > readSize {
             try? handle.seek(toOffset: fileSize - readSize)
         } else {
@@ -123,17 +138,11 @@ actor TmuxSessionMatcher {
         }
 
         guard let data = try? handle.readToEnd(),
-              let content = String(data: data, encoding: .utf8) else {
+              let content = String(data: data, encoding: .utf8)
+        else {
             return 0
         }
 
-        var matchCount = 0
-        for snippet in snippets {
-            if content.contains(snippet) {
-                matchCount += 1
-            }
-        }
-
-        return matchCount
+        return snippets.count { content.contains($0) }
     }
 }

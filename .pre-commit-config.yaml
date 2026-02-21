@@ -1,0 +1,89 @@
+# Pre-commit configuration for Claude Island
+# Install: prek install --hook-type pre-commit --hook-type pre-push
+# Run all: prek run --all-files
+
+default_language_version:
+  python: python3
+
+exclude: |
+  (?x)^(
+    .*\.xcodeproj/.*|
+    .*\.xcworkspace/.*|
+    build/.*|
+    DerivedData/.*|
+    \.build/.*|
+    releases/.*|
+    Pods/.*|
+    \.sparkle-keys/.*|
+    .*\.xcuserstate|
+    xcuserdata/.*
+  )$
+
+repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  # SwiftFormat - Auto-format Swift files
+  - repo: https://github.com/nicklockwood/SwiftFormat
+    rev: 0.55.3
+    hooks:
+      - id: swiftformat
+        name: swiftformat
+        entry: swiftformat
+        language: system
+        types: [swift]
+
+  # SwiftLint - Lint Swift files
+  - repo: https://github.com/realm/SwiftLint
+    rev: 0.57.1
+    hooks:
+      - id: swiftlint
+        name: swiftlint
+        entry: swiftlint lint --strict
+        language: system
+        types: [swift]
+
+  # Shellcheck - Validate shell scripts
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: ^scripts/.*\.sh$
+
+  # Ruff - Python linting and formatting (official hooks)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.11
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^ClaudeIsland/Resources/.*\.py$
+      - id: ruff-format
+        files: ^ClaudeIsland/Resources/.*\.py$
+
+  # Markdownlint - Markdown consistency
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.43.0
+    hooks:
+      - id: markdownlint
+        args: [--fix]
+        files: \.(md|markdown)$
+        exclude: ^(\.augment/|LICENSE\.md)
+
+# Pre-push hooks
+default_stages: [pre-commit]
+
+ci:
+  skip: [swiftformat, swiftlint]

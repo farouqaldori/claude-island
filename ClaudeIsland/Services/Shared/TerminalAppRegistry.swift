@@ -8,9 +8,9 @@
 import Foundation
 
 /// Registry of known terminal application names and bundle identifiers
-struct TerminalAppRegistry: Sendable {
+nonisolated struct TerminalAppRegistry: Sendable {
     /// Terminal app names for process matching
-    static let appNames: Set<String> = [
+    nonisolated static let appNames: Set<String> = [
         "Terminal",
         "iTerm2",
         "iTerm",
@@ -27,15 +27,15 @@ struct TerminalAppRegistry: Sendable {
         "st",
         "urxvt",
         "xterm",
-        "Code",           // VS Code
+        "Code", // VS Code
         "Code - Insiders",
         "Cursor",
         "Windsurf",
-        "zed"
+        "zed",
     ]
 
     /// Bundle identifiers for terminal apps (for window enumeration)
-    static let bundleIdentifiers: Set<String> = [
+    nonisolated static let bundleIdentifiers: Set<String> = [
         "com.apple.Terminal",
         "com.googlecode.iterm2",
         "com.mitchellh.ghostty",
@@ -47,20 +47,18 @@ struct TerminalAppRegistry: Sendable {
         "com.github.wez.wezterm",
         "com.microsoft.VSCode",
         "com.microsoft.VSCodeInsiders",
-        "com.todesktop.230313mzl4w4u92",  // Cursor
+        "com.todesktop.230313mzl4w4u92", // Cursor
         "com.exafunction.windsurf",
-        "dev.zed.Zed"
+        "dev.zed.Zed",
     ]
 
     /// Check if an app name or command path is a known terminal
-    static func isTerminal(_ appNameOrCommand: String) -> Bool {
+    nonisolated static func isTerminal(_ appNameOrCommand: String) -> Bool {
         let lower = appNameOrCommand.lowercased()
 
         // Check if any known app name is contained in the command (case-insensitive)
-        for name in appNames {
-            if lower.contains(name.lowercased()) {
-                return true
-            }
+        if self.appNames.contains(where: { lower.contains($0.lowercased()) }) {
+            return true
         }
 
         // Additional checks for common patterns
@@ -68,7 +66,7 @@ struct TerminalAppRegistry: Sendable {
     }
 
     /// Check if a bundle identifier is a known terminal
-    static func isTerminalBundle(_ bundleId: String) -> Bool {
-        bundleIdentifiers.contains(bundleId)
+    nonisolated static func isTerminalBundle(_ bundleID: String) -> Bool {
+        self.bundleIdentifiers.contains(bundleID)
     }
 }

@@ -3,73 +3,85 @@
 //  ClaudeIsland
 //
 
-import Combine
 import Foundation
+import Observation
 
-@MainActor
-class ChatHistoryManager: ObservableObject {
-    static let shared = ChatHistoryManager()
+// MARK: - ChatHistoryManager
 
-    @Published private(set) var histories: [String: [ChatHistoryItem]] = [:]
-    @Published private(set) var agentDescriptions: [String: [String: String]] = [:]
-
-    private var loadedSessions: Set<String> = []
-    private var cancellables = Set<AnyCancellable>()
+/// Manager for chat history using modern @Observable macro for efficient SwiftUI updates.
+/// Subscribes to SessionStore's Combine publisher to receive session state changes.
+@Observable
+final class ChatHistoryManager {
+    // MARK: Lifecycle
 
     private init() {
-        SessionStore.shared.sessionsPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] sessions in
+        self.sessionsTask = Task(name: "chat-history-stream") { [weak self] in
+            let stream = SessionStore.shared.sessionsStream()
+            for await sessions in stream {
                 self?.updateFromSessions(sessions)
             }
-            .store(in: &cancellables)
+        }
     }
+
+    // MARK: Internal
+
+    static let shared = ChatHistoryManager()
+
+    private(set) var histories: [String: [ChatHistoryItem]] = [:]
+    private(set) var agentDescriptions: [String: [String: String]] = [:]
 
     // MARK: - Public API
 
-    func history(for sessionId: String) -> [ChatHistoryItem] {
-        histories[sessionId] ?? []
+    func history(for sessionID: String) -> [ChatHistoryItem] {
+        self.histories[sessionID] ?? []
     }
 
-    func isLoaded(sessionId: String) -> Bool {
-        loadedSessions.contains(sessionId)
+    func isLoaded(sessionID: String) -> Bool {
+        self.loadedSessions.contains(sessionID)
     }
 
-    func loadFromFile(sessionId: String, cwd: String) async {
-        guard !loadedSessions.contains(sessionId) else { return }
-        loadedSessions.insert(sessionId)
-        await SessionStore.shared.process(.loadHistory(sessionId: sessionId, cwd: cwd))
+    func loadFromFile(sessionID: String, cwd: String) async {
+        guard !self.loadedSessions.contains(sessionID) else { return }
+        self.loadedSessions.insert(sessionID)
+        await SessionStore.shared.process(.loadHistory(sessionID: sessionID, cwd: cwd))
     }
 
-    func syncFromFile(sessionId: String, cwd: String) async {
+    func syncFromFile(sessionID: String, cwd: String) async {
         let messages = await ConversationParser.shared.parseFullConversation(
-            sessionId: sessionId,
-            cwd: cwd
+            sessionID: sessionID,
+            cwd: cwd,
         )
-        let completedTools = await ConversationParser.shared.completedToolIds(for: sessionId)
-        let toolResults = await ConversationParser.shared.toolResults(for: sessionId)
-        let structuredResults = await ConversationParser.shared.structuredResults(for: sessionId)
+        let completedTools = await ConversationParser.shared.completedToolIDs(for: sessionID)
+        let toolResults = await ConversationParser.shared.toolResults(for: sessionID)
+        let structuredResults = await ConversationParser.shared.structuredResults(for: sessionID)
 
         let payload = FileUpdatePayload(
-            sessionId: sessionId,
+            sessionID: sessionID,
             cwd: cwd,
             messages: messages,
-            isIncremental: false,  // Full sync
-            completedToolIds: completedTools,
+            isIncremental: false, // Full sync
+            completedToolIDs: completedTools,
             toolResults: toolResults,
-            structuredResults: structuredResults
+            structuredResults: structuredResults,
         )
 
         await SessionStore.shared.process(.fileUpdated(payload))
     }
 
-    func clearHistory(for sessionId: String) {
-        loadedSessions.remove(sessionId)
-        histories.removeValue(forKey: sessionId)
-        Task {
-            await SessionStore.shared.process(.sessionEnded(sessionId: sessionId))
+    func clearHistory(for sessionID: String) {
+        self.loadedSessions.remove(sessionID)
+        self.histories.removeValue(forKey: sessionID)
+        Task(name: "clear-history") {
+            await SessionStore.shared.process(.sessionEnded(sessionID: sessionID))
         }
     }
+
+    // MARK: Private
+
+    /// Tracks which sessions have been loaded - ignored by Observation since it's internal state
+    @ObservationIgnored private var loadedSessions: Set<String> = []
+    /// Task for sessions stream subscription
+    @ObservationIgnored private var sessionsTask: Task<Void, Never>?
 
     // MARK: - State Updates
 
@@ -77,42 +89,44 @@ class ChatHistoryManager: ObservableObject {
         var newHistories: [String: [ChatHistoryItem]] = [:]
         var newAgentDescriptions: [String: [String: String]] = [:]
         for session in sessions {
-            let filteredItems = filterOutSubagentTools(session.chatItems)
-            newHistories[session.sessionId] = filteredItems
-            newAgentDescriptions[session.sessionId] = session.subagentState.agentDescriptions
-            loadedSessions.insert(session.sessionId)
+            let filteredItems = self.filterOutSubagentTools(session.chatItems)
+            newHistories[session.sessionID] = filteredItems
+            newAgentDescriptions[session.sessionID] = session.subagentState.agentDescriptions
+            self.loadedSessions.insert(session.sessionID)
         }
-        histories = newHistories
-        agentDescriptions = newAgentDescriptions
+        self.histories = newHistories
+        self.agentDescriptions = newAgentDescriptions
     }
 
     private func filterOutSubagentTools(_ items: [ChatHistoryItem]) -> [ChatHistoryItem] {
-        var subagentToolIds = Set<String>()
+        var subagentToolIDs = Set<String>()
         for item in items {
-            if case .toolCall(let tool) = item.type, tool.name == "Task" {
+            if case let .toolCall(tool) = item.type, tool.name == "Task" {
                 for subagentTool in tool.subagentTools {
-                    subagentToolIds.insert(subagentTool.id)
+                    subagentToolIDs.insert(subagentTool.id)
                 }
             }
         }
 
-        return items.filter { !subagentToolIds.contains($0.id) }
+        return items.filter { !subagentToolIDs.contains($0.id) }
     }
 }
 
-// MARK: - Models
+// MARK: - ChatHistoryItem
 
-struct ChatHistoryItem: Identifiable, Equatable, Sendable {
+nonisolated struct ChatHistoryItem: Identifiable, Equatable, Sendable {
     let id: String
     let type: ChatHistoryItemType
     let timestamp: Date
 
-    static func == (lhs: ChatHistoryItem, rhs: ChatHistoryItem) -> Bool {
+    static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id && lhs.type == rhs.type
     }
 }
 
-enum ChatHistoryItemType: Equatable, Sendable {
+// MARK: - ChatHistoryItemType
+
+nonisolated enum ChatHistoryItemType: Equatable, Sendable {
     case user(String)
     case assistant(String)
     case toolCall(ToolCallItem)
@@ -120,7 +134,9 @@ enum ChatHistoryItemType: Equatable, Sendable {
     case interrupted
 }
 
-struct ToolCallItem: Equatable, Sendable {
+// MARK: - ToolCallItem
+
+nonisolated struct ToolCallItem: Equatable, Sendable {
     let name: String
     let input: [String: String]
     var status: ToolStatus
@@ -148,74 +164,54 @@ struct ToolCallItem: Equatable, Sendable {
         if let url = input["url"] {
             return url
         }
-        if let agentId = input["agentId"] {
-            let blocking = input["block"] == "true"
-            return blocking ? "Waiting..." : "Checking \(agentId.prefix(8))..."
+        if let agentID = input["agentId"] {
+            let blocking = self.input["block"] == "true"
+            return blocking ? "Waiting..." : "Checking \(agentID.prefix(8))..."
         }
-        return input.values.first.map { String($0.prefix(60)) } ?? ""
+        return self.input.values.first.map { String($0.prefix(60)) } ?? ""
     }
 
     /// Status display text for the tool
     var statusDisplay: ToolStatusDisplay {
-        if status == .running {
-            return ToolStatusDisplay.running(for: name, input: input)
+        if self.status == .running {
+            return ToolStatusDisplay.running(for: self.name, input: self.input)
         }
-        if status == .waitingForApproval {
+        if self.status == .waitingForApproval {
             return ToolStatusDisplay(text: "Waiting for approval...", isRunning: true)
         }
-        if status == .interrupted {
+        if self.status == .interrupted {
             return ToolStatusDisplay(text: "Interrupted", isRunning: false)
         }
-        return ToolStatusDisplay.completed(for: name, result: structuredResult)
-    }
-
-    // Custom Equatable implementation to handle structuredResult
-    static func == (lhs: ToolCallItem, rhs: ToolCallItem) -> Bool {
-        lhs.name == rhs.name &&
-        lhs.input == rhs.input &&
-        lhs.status == rhs.status &&
-        lhs.result == rhs.result &&
-        lhs.structuredResult == rhs.structuredResult &&
-        lhs.subagentTools == rhs.subagentTools
+        return ToolStatusDisplay.completed(for: self.name, result: self.structuredResult)
     }
 }
 
-enum ToolStatus: Sendable, CustomStringConvertible {
+// MARK: - ToolStatus
+
+nonisolated enum ToolStatus: Equatable, Sendable, CustomStringConvertible {
     case running
     case waitingForApproval
     case success
     case error
     case interrupted
 
+    // MARK: Internal
+
     nonisolated var description: String {
         switch self {
-        case .running: return "running"
-        case .waitingForApproval: return "waitingForApproval"
-        case .success: return "success"
-        case .error: return "error"
-        case .interrupted: return "interrupted"
+        case .running: "running"
+        case .waitingForApproval: "waitingForApproval"
+        case .success: "success"
+        case .error: "error"
+        case .interrupted: "interrupted"
         }
     }
 }
 
-// Explicit nonisolated Equatable conformance to avoid actor isolation issues
-extension ToolStatus: Equatable {
-    nonisolated static func == (lhs: ToolStatus, rhs: ToolStatus) -> Bool {
-        switch (lhs, rhs) {
-        case (.running, .running): return true
-        case (.waitingForApproval, .waitingForApproval): return true
-        case (.success, .success): return true
-        case (.error, .error): return true
-        case (.interrupted, .interrupted): return true
-        default: return false
-        }
-    }
-}
-
-// MARK: - Subagent Tool Call
+// MARK: - SubagentToolCall
 
 /// Represents a tool call made by a subagent (Task tool)
-struct SubagentToolCall: Equatable, Identifiable, Sendable {
+nonisolated struct SubagentToolCall: Equatable, Identifiable, Sendable {
     let id: String
     let name: String
     let input: [String: String]
@@ -224,7 +220,7 @@ struct SubagentToolCall: Equatable, Identifiable, Sendable {
 
     /// Short description for display
     var displayText: String {
-        switch name {
+        switch self.name {
         case "Read":
             if let path = input["file_path"] {
                 return URL(fileURLWithPath: path).lastPathComponent
@@ -270,7 +266,7 @@ struct SubagentToolCall: Equatable, Identifiable, Sendable {
             }
             return "Searching web..."
         default:
-            return name
+            return self.name
         }
     }
 }

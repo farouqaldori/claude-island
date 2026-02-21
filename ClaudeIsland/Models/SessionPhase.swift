@@ -8,48 +8,72 @@
 
 import Foundation
 
+// MARK: - PermissionContext
+
 /// Permission context for tools waiting for approval
-struct PermissionContext: Sendable {
-    let toolUseId: String
+/// Stores tool input directly as `[String: JSONValue]?` — natively `Sendable` without serialization.
+nonisolated struct PermissionContext: Sendable {
+    let toolUseID: String
     let toolName: String
-    let toolInput: [String: AnyCodable]?
+    /// Tool input stored directly — JSONValue is natively Sendable
+    let toolInput: [String: JSONValue]?
     let receivedAt: Date
 
-    /// Format tool input for display
+    /// Format tool input for display with smart prioritization
+    /// - Bash: Shows `command` parameter directly
+    /// - Read/Write/Edit: Shows filename only (lastPathComponent)
+    /// - Other tools: First non-empty string value as fallback
     var formattedInput: String? {
         guard let input = toolInput else { return nil }
-        var parts: [String] = []
-        for (key, value) in input {
-            let valueStr: String
-            switch value.value {
-            case let str as String:
-                valueStr = str.count > 100 ? String(str.prefix(100)) + "..." : str
-            case let num as Int:
-                valueStr = String(num)
-            case let num as Double:
-                valueStr = String(num)
-            case let bool as Bool:
-                valueStr = bool ? "true" : "false"
-            default:
-                valueStr = "..."
+
+        // Priority keys for specific tools
+        let priorityKeys: [String: String] = [
+            "Bash": "command",
+            "Read": "file_path",
+            "Write": "file_path",
+            "Edit": "file_path",
+        ]
+
+        // Check if tool has a priority key
+        if let key = priorityKeys[toolName],
+           let value = input[key]?.stringValue,
+           !value.isEmpty {
+            // For file operations, show only filename
+            if ["Read", "Write", "Edit"].contains(self.toolName) {
+                return (value as NSString).lastPathComponent
             }
-            parts.append("\(key): \(valueStr)")
+            return value.count > 100 ? String(value.prefix(100)) + "..." : value
         }
-        return parts.joined(separator: "\n")
+
+        // Fallback: first non-empty string value (skip "description" key)
+        for (key, value) in input {
+            if key == "description" { continue }
+            if let str = value.stringValue, !str.isEmpty {
+                return str.count > 100 ? String(str.prefix(100)) + "..." : str
+            }
+        }
+
+        return nil
     }
 }
 
-extension PermissionContext: Equatable {
+// MARK: Equatable
+
+// swiftformat:disable all
+nonisolated extension PermissionContext: Equatable {
     nonisolated static func == (lhs: PermissionContext, rhs: PermissionContext) -> Bool {
-        // Compare by identity fields only (AnyCodable doesn't conform to Equatable)
-        lhs.toolUseId == rhs.toolUseId &&
-        lhs.toolName == rhs.toolName &&
-        lhs.receivedAt == rhs.receivedAt
+        lhs.toolUseID == rhs.toolUseID &&
+            lhs.toolName == rhs.toolName &&
+            lhs.toolInput == rhs.toolInput &&
+            lhs.receivedAt == rhs.receivedAt
     }
 }
+// swiftformat:enable all
+
+// MARK: - SessionPhase
 
 /// Explicit session phases - the state machine
-enum SessionPhase: Sendable {
+nonisolated enum SessionPhase: Sendable {
     /// Session is idle, waiting for user input or new activity
     case idle
 
@@ -68,96 +92,32 @@ enum SessionPhase: Sendable {
     /// Session has ended
     case ended
 
-    // MARK: - State Machine Transitions
-
-    /// Check if a transition to the target phase is valid
-    nonisolated func canTransition(to next: SessionPhase) -> Bool {
-        switch (self, next) {
-        // Terminal state - no transitions out
-        case (.ended, _):
-            return false
-
-        // Any state can transition to ended
-        case (_, .ended):
-            return true
-
-        // Idle transitions
-        case (.idle, .processing):
-            return true
-        case (.idle, .waitingForApproval):
-            return true  // Direct permission request on idle session
-        case (.idle, .compacting):
-            return true
-
-        // Processing transitions
-        case (.processing, .waitingForInput):
-            return true
-        case (.processing, .waitingForApproval):
-            return true
-        case (.processing, .compacting):
-            return true
-        case (.processing, .idle):
-            return true  // Interrupt or quick completion
-
-        // WaitingForInput transitions
-        case (.waitingForInput, .processing):
-            return true
-        case (.waitingForInput, .idle):
-            return true  // Can become idle
-        case (.waitingForInput, .compacting):
-            return true
-
-        // WaitingForApproval transitions
-        case (.waitingForApproval, .processing):
-            return true  // Approved - tool will run
-        case (.waitingForApproval, .idle):
-            return true  // Denied or cancelled
-        case (.waitingForApproval, .waitingForInput):
-            return true  // Denied and Claude stopped
-        case (.waitingForApproval, .waitingForApproval):
-            return true  // Another tool needs approval (multiple pending permissions)
-
-        // Compacting transitions
-        case (.compacting, .processing):
-            return true
-        case (.compacting, .idle):
-            return true
-        case (.compacting, .waitingForInput):
-            return true
-
-        // Allow staying in same state (no-op transitions)
-        default:
-            return self == next
-        }
-    }
-
-    /// Attempt to transition to a new phase, returns the new phase if valid
-    nonisolated func transition(to next: SessionPhase) -> SessionPhase? {
-        canTransition(to: next) ? next : nil
-    }
+    // MARK: Internal
 
     /// Whether this phase indicates the session needs user attention
     var needsAttention: Bool {
         switch self {
-        case .waitingForApproval, .waitingForInput:
-            return true
+        case .waitingForApproval,
+             .waitingForInput:
+            true
         default:
-            return false
+            false
         }
     }
 
     /// Whether this phase indicates active processing
     var isActive: Bool {
         switch self {
-        case .processing, .compacting:
-            return true
+        case .processing,
+             .compacting:
+            true
         default:
-            return false
+            false
         }
     }
 
     /// Whether this is a waitingForApproval phase
-    var isWaitingForApproval: Bool {
+    nonisolated var isWaitingForApproval: Bool {
         if case .waitingForApproval = self {
             return true
         }
@@ -166,47 +126,113 @@ enum SessionPhase: Sendable {
 
     /// Extract tool name if waiting for approval
     var approvalToolName: String? {
-        if case .waitingForApproval(let ctx) = self {
+        if case let .waitingForApproval(ctx) = self {
             return ctx.toolName
         }
         return nil
     }
-}
 
-// MARK: - Equatable
+    // MARK: - State Machine Transitions
 
-extension SessionPhase: Equatable {
-    nonisolated static func == (lhs: SessionPhase, rhs: SessionPhase) -> Bool {
-        switch (lhs, rhs) {
-        case (.idle, .idle): return true
-        case (.processing, .processing): return true
-        case (.waitingForInput, .waitingForInput): return true
-        case (.waitingForApproval(let ctx1), .waitingForApproval(let ctx2)):
-            return ctx1 == ctx2
-        case (.compacting, .compacting): return true
-        case (.ended, .ended): return true
-        default: return false
+    /// Check if a transition to the target phase is valid
+    nonisolated func canTransition(to next: Self) -> Bool {
+        // Terminal state - no transitions out
+        if case .ended = self { return false }
+        // Any state can transition to ended
+        if case .ended = next { return true }
+        // Allow staying in same state (no-op transitions)
+        if self == next { return true }
+
+        return Self.allowedTransitions(from: self).contains { $0.matches(next) }
+    }
+
+    /// Attempt to transition to a new phase, returns the new phase if valid
+    nonisolated func transition(to next: Self) -> Self? {
+        self.canTransition(to: next) ? next : nil
+    }
+
+    // MARK: Private
+
+    /// Simplified phase key for transition lookup (strips associated values)
+    private enum PhaseKey: Hashable {
+        case idle
+        case processing
+        case waitingForInput
+        case waitingForApproval
+        case compacting
+        case ended
+
+        // MARK: Internal
+
+        nonisolated func matches(_ phase: SessionPhase) -> Bool {
+            switch (self, phase) {
+            case (.idle, .idle),
+                 (.processing, .processing),
+                 (.waitingForInput, .waitingForInput),
+                 (.waitingForApproval, .waitingForApproval),
+                 (.compacting, .compacting),
+                 (.ended, .ended):
+                true
+            default:
+                false
+            }
+        }
+    }
+
+    /// Valid transitions from each phase
+    private nonisolated static func allowedTransitions(from phase: Self) -> [PhaseKey] {
+        switch phase {
+        case .idle:
+            // Note: .waitingForInput is allowed for history loading where we discover actual state
+            [.processing, .waitingForApproval, .compacting, .waitingForInput]
+        case .processing:
+            [.waitingForInput, .waitingForApproval, .compacting, .idle]
+        case .waitingForInput:
+            [.processing, .idle, .compacting]
+        case .waitingForApproval:
+            [.processing, .idle, .waitingForInput, .waitingForApproval]
+        case .compacting:
+            [.processing, .idle, .waitingForInput]
+        case .ended:
+            []
         }
     }
 }
 
-// MARK: - Debug Description
+// MARK: Equatable
 
-extension SessionPhase: CustomStringConvertible {
+nonisolated extension SessionPhase: Equatable {
+    nonisolated static func == (lhs: SessionPhase, rhs: SessionPhase) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle): true
+        case (.processing, .processing): true
+        case (.waitingForInput, .waitingForInput): true
+        case let (.waitingForApproval(ctx1), .waitingForApproval(ctx2)):
+            ctx1 == ctx2
+        case (.compacting, .compacting): true
+        case (.ended, .ended): true
+        default: false
+        }
+    }
+}
+
+// MARK: CustomStringConvertible
+
+nonisolated extension SessionPhase: CustomStringConvertible {
     nonisolated var description: String {
         switch self {
         case .idle:
-            return "idle"
+            "idle"
         case .processing:
-            return "processing"
+            "processing"
         case .waitingForInput:
-            return "waitingForInput"
-        case .waitingForApproval(let ctx):
-            return "waitingForApproval(\(ctx.toolName))"
+            "waitingForInput"
+        case let .waitingForApproval(ctx):
+            "waitingForApproval(\(ctx.toolName))"
         case .compacting:
-            return "compacting"
+            "compacting"
         case .ended:
-            return "ended"
+            "ended"
         }
     }
 }

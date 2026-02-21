@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  workflow_run:
+    workflows: ["Code Quality"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  build:
+    name: Build DMG
+    runs-on: macos-15
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build with ad-hoc signing
+        run: ./scripts/build.sh
+
+      - name: Install create-dmg
+        run: brew install create-dmg || true
+
+      - name: Setup Sparkle key
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          mkdir -p .sparkle-keys
+          echo "$SPARKLE_PRIVATE_KEY" > .sparkle-keys/eddsa_private_key
+
+      - name: Create DMG and sign with Sparkle
+        run: ./scripts/create-release.sh --skip-notarization --skip-github --skip-website
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
+            "build/export/Claude Island.app/Contents/Info.plist")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: claude-island-dmg
+          path: releases/ClaudeIsland-${{ steps.version.outputs.version }}.dmg
+          retention-days: 30
+
+  virustotal-scan:
+    name: VirusTotal Scan
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download DMG artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: claude-island-dmg
+
+      - name: Scan with VirusTotal
+        uses: crazy-max/ghaction-virustotal@v4
+        id: virustotal
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          request_rate: 4
+          files: |
+            *.dmg
+
+      - name: Create scan results summary
+        run: |
+          # Build the markdown content
+          {
+            echo "## 🛡️ VirusTotal Scan Results"
+            echo ""
+            echo "**Scan completed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "### Analysis Reports"
+            echo ""
+            echo "| File | Report |"
+            echo "|------|--------|"
+            # Output format is comma-separated "filename=url" pairs
+            IFS=',' read -ra PAIRS <<< "${{ steps.virustotal.outputs.analysis }}"
+            for pair in "${PAIRS[@]}"; do
+              filename="${pair%%=*}"
+              url="${pair#*=}"
+              echo "| 📦 \`${filename}\` | [View VirusTotal Report](${url}) |"
+            done
+            echo ""
+            echo "---"
+            echo ""
+            echo "_Click the links above to view full analysis on VirusTotal._"
+          } | tee virustotal-results.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v6
+        with:
+          name: virustotal-results
+          path: virustotal-results.md
+          retention-days: 90

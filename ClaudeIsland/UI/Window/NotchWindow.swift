@@ -9,19 +9,21 @@
 
 import AppKit
 
-// Use NSPanel subclass for non-activating behavior
+/// Use NSPanel subclass for non-activating behavior
 class NotchPanel: NSPanel {
+    // MARK: Lifecycle
+
     override init(
         contentRect: NSRect,
         styleMask style: NSWindow.StyleMask,
         backing backingStoreType: NSWindow.BackingStoreType,
-        defer flag: Bool
+        defer flag: Bool,
     ) {
         super.init(
             contentRect: contentRect,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
-            defer: false
+            defer: false,
         )
 
         // Floating panel behavior
@@ -43,7 +45,7 @@ class NotchPanel: NSPanel {
             .fullScreenAuxiliary,
             .stationary,
             .canJoinAllSpaces,
-            .ignoresCycle
+            .ignoresCycle,
         ]
 
         // Above the menu bar
@@ -61,20 +63,27 @@ class NotchPanel: NSPanel {
         acceptsMouseMovedEvents = false
     }
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    // MARK: Internal
+
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        false
+    }
 
     // MARK: - Click-through for areas outside the panel content
 
     override func sendEvent(_ event: NSEvent) {
         // For mouse events, check if we should pass through
         if event.type == .leftMouseDown || event.type == .leftMouseUp ||
-           event.type == .rightMouseDown || event.type == .rightMouseUp {
+            event.type == .rightMouseDown || event.type == .rightMouseUp {
             // Get the location in window coordinates
             let locationInWindow = event.locationInWindow
 
             // Check if any view wants to handle this event
-            if let contentView = self.contentView,
+            if let contentView,
                contentView.hitTest(locationInWindow) == nil {
                 // No view wants this event - pass it through to windows behind
                 // by temporarily ignoring mouse events and re-posting
@@ -82,7 +91,7 @@ class NotchPanel: NSPanel {
                 ignoresMouseEvents = true
 
                 // Re-post the event after a tiny delay
-                DispatchQueue.main.async { [weak self] in
+                Task(name: "notch-window-mouse-up") { @MainActor [weak self] in
                     self?.repostMouseEvent(event, at: screenLocation)
                 }
                 return
@@ -91,6 +100,8 @@ class NotchPanel: NSPanel {
 
         super.sendEvent(event)
     }
+
+    // MARK: Private
 
     private func repostMouseEvent(_ event: NSEvent, at screenLocation: NSPoint) {
         // Convert to CGEvent coordinate system (Y from top of screen)
@@ -113,7 +124,7 @@ class NotchPanel: NSPanel {
             mouseEventSource: nil,
             mouseType: mouseType,
             mouseCursorPosition: cgPoint,
-            mouseButton: mouseButton
+            mouseButton: mouseButton,
         ) {
             cgEvent.post(tap: .cghidEventTap)
         }

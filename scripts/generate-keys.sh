@@ -86,9 +86,11 @@ echo ""
 
 # Add to .gitignore if not already there
 if ! grep -q ".sparkle-keys" "$PROJECT_DIR/.gitignore" 2>/dev/null; then
-    echo "" >> "$PROJECT_DIR/.gitignore"
-    echo "# Sparkle signing keys (NEVER commit these!)" >> "$PROJECT_DIR/.gitignore"
-    echo ".sparkle-keys/" >> "$PROJECT_DIR/.gitignore"
+    {
+        echo ""
+        echo "# Sparkle signing keys (NEVER commit these!)"
+        echo ".sparkle-keys/"
+    } >> "$PROJECT_DIR/.gitignore"
     echo "Added .sparkle-keys/ to .gitignore"
 fi
 

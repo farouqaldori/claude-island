@@ -6,15 +6,12 @@
 //
 
 import AppKit
-import Combine
 import SwiftUI
 
 class NotchWindowController: NSWindowController {
-    let viewModel: NotchViewModel
-    private let screen: NSScreen
-    private var cancellables = Set<AnyCancellable>()
+    // MARK: Lifecycle
 
-    init(screen: NSScreen) {
+    init(screen: NSScreen, animateOnLaunch: Bool = true) {
         self.screen = screen
 
         let screenFrame = screen.frame
@@ -26,7 +23,7 @@ class NotchWindowController: NSWindowController {
             x: screenFrame.origin.x,
             y: screenFrame.maxY - windowHeight,
             width: screenFrame.width,
-            height: windowHeight
+            height: windowHeight,
         )
 
         // Device notch rect - positioned at center
@@ -34,7 +31,7 @@ class NotchWindowController: NSWindowController {
             x: (screenFrame.width - notchSize.width) / 2,
             y: 0,
             width: notchSize.width,
-            height: notchSize.height
+            height: notchSize.height,
         )
 
         // Create view model
@@ -42,7 +39,7 @@ class NotchWindowController: NSWindowController {
             deviceNotchRect: deviceNotchRect,
             screenRect: screenFrame,
             windowHeight: windowHeight,
-            hasPhysicalNotch: screen.hasPhysicalNotch
+            hasPhysicalNotch: screen.hasPhysicalNotch,
         )
 
         // Create the window
@@ -50,7 +47,7 @@ class NotchWindowController: NSWindowController {
             contentRect: windowFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
-            defer: false
+            defer: false,
         )
 
         super.init(window: notchWindow)
@@ -64,9 +61,9 @@ class NotchWindowController: NSWindowController {
         // Dynamically toggle mouse event handling based on notch state:
         // - Closed: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
         // - Opened: ignoresMouseEvents = false (buttons inside panel work)
-        viewModel.$status
-            .receive(on: DispatchQueue.main)
-            .sink { [weak notchWindow, weak viewModel] status in
+        let statusStream = self.viewModel.makeStatusStream()
+        self.statusTask = Task(name: "notch-status-stream") { @MainActor [weak notchWindow, weak viewModel] in
+            for await status in statusStream {
                 switch status {
                 case .opened:
                     // Accept mouse events when opened so buttons work
@@ -76,23 +73,44 @@ class NotchWindowController: NSWindowController {
                         NSApp.activate(ignoringOtherApps: false)
                         notchWindow?.makeKey()
                     }
-                case .closed, .popping:
+                case .closed,
+                     .popping:
                     // Ignore mouse events when closed so clicks pass through
                     notchWindow?.ignoresMouseEvents = true
                 }
             }
-            .store(in: &cancellables)
+        }
 
         // Start with ignoring mouse events (closed state)
         notchWindow.ignoresMouseEvents = true
 
-        // Perform boot animation after a brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.viewModel.performBootAnimation()
+        // Perform boot animation after a brief delay (only on initial launch)
+        if animateOnLaunch {
+            self.bootAnimationTask = Task(name: "boot-animation-delay") { [weak self] in
+                try? await Task.sleep(for: .seconds(0.3))
+                guard !Task.isCancelled else { return }
+                self?.viewModel.performBootAnimation()
+            }
         }
     }
 
+    deinit {
+        statusTask?.cancel()
+        bootAnimationTask?.cancel()
+    }
+
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    // MARK: Internal
+
+    let viewModel: NotchViewModel
+
+    // MARK: Private
+
+    private let screen: NSScreen
+    private var statusTask: Task<Void, Never>?
+    private var bootAnimationTask: Task<Void, Never>?
 }

@@ -1,0 +1,278 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (without v prefix)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15  # Use macos-15 for Xcode 16.x support (macos-latest becomes macos-15 in Aug 2025)
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.version-update.outputs.build_number }}
+      dmg_size: ${{ steps.dmg-info.outputs.size }}
+      ed_signature: ${{ steps.dmg-info.outputs.signature }}
+      min_system: ${{ steps.dmg-info.outputs.min_system }}
+      has_sparkle: ${{ steps.sparkle-key.outputs.has_key }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Get version from tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            VERSION="${VERSION#v}"  # Strip leading v if present for consistency
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Xcode project version and commit
+        id: version-update
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD_NUMBER="$(date +%Y%m%d%H%M)"
+
+          # Update MARKETING_VERSION directly in project.pbxproj
+          # (agvtool doesn't work when Info.plist uses $(MARKETING_VERSION) variable references)
+          sed -i '' "s/MARKETING_VERSION = .*;/MARKETING_VERSION = $VERSION;/g" ClaudeIsland.xcodeproj/project.pbxproj
+
+          # Update CURRENT_PROJECT_VERSION directly in project.pbxproj
+          sed -i '' "s/CURRENT_PROJECT_VERSION = .*;/CURRENT_PROJECT_VERSION = $BUILD_NUMBER;/g" ClaudeIsland.xcodeproj/project.pbxproj
+
+          echo "✅ Set MARKETING_VERSION=$VERSION, CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
+          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+
+          # Commit version changes back to repository
+          if git diff --quiet ClaudeIsland.xcodeproj/project.pbxproj; then
+            echo "Version already matches tag, no commit needed"
+          else
+            # Configure git
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            # Commit version change (--no-verify bypasses pre-commit hooks)
+            git add ClaudeIsland.xcodeproj/project.pbxproj
+            git commit --no-verify -m "chore: bump version to $VERSION [skip ci]"
+
+            # Push to main branch
+            git push origin HEAD:main
+            echo "✅ Version committed and pushed to main"
+          fi
+
+      - name: Build with ad-hoc signing
+        run: ./scripts/build.sh
+
+      - name: Install create-dmg
+        run: brew install create-dmg || true
+
+      - name: Setup Sparkle key
+        id: sparkle-key
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          if [ -n "$SPARKLE_PRIVATE_KEY" ]; then
+            mkdir -p .sparkle-keys
+            echo "$SPARKLE_PRIVATE_KEY" > .sparkle-keys/eddsa_private_key
+            echo "has_key=true" >> $GITHUB_OUTPUT
+            echo "✅ Sparkle private key configured"
+          else
+            echo "has_key=false" >> $GITHUB_OUTPUT
+            echo "⚠️ SPARKLE_PRIVATE_KEY secret not set - Sparkle signing will be skipped"
+          fi
+
+      - name: Create DMG and sign with Sparkle
+        run: |
+          SPARKLE_FLAG=""
+          if [ "${{ steps.sparkle-key.outputs.has_key }}" != "true" ]; then
+            SPARKLE_FLAG="--skip-sparkle"
+          fi
+          ./scripts/create-release.sh --skip-notarization --skip-github --skip-website $SPARKLE_FLAG
+
+      - name: Rename DMG to match release version
+        id: rename-dmg
+        run: |
+          RELEASE_VERSION="${{ steps.version.outputs.version }}"
+          # Find the actual DMG created by create-release.sh (uses Info.plist version)
+          ACTUAL_DMG=$(ls -1 releases/ClaudeIsland-*.dmg 2>/dev/null | head -1)
+          if [ -z "$ACTUAL_DMG" ]; then
+            echo "ERROR: No DMG found in releases/"
+            exit 1
+          fi
+          TARGET_DMG="releases/ClaudeIsland-${RELEASE_VERSION}.dmg"
+          if [ "$ACTUAL_DMG" != "$TARGET_DMG" ]; then
+            echo "Renaming $ACTUAL_DMG -> $TARGET_DMG"
+            mv "$ACTUAL_DMG" "$TARGET_DMG"
+            # Also rename in appcast directory if exists
+            ACTUAL_APPCAST_DMG="releases/appcast/$(basename "$ACTUAL_DMG")"
+            if [ -f "$ACTUAL_APPCAST_DMG" ]; then
+              mv "$ACTUAL_APPCAST_DMG" "releases/appcast/ClaudeIsland-${RELEASE_VERSION}.dmg"
+            fi
+          fi
+          echo "dmg_path=$TARGET_DMG" >> $GITHUB_OUTPUT
+
+      - name: Get DMG info
+        id: dmg-info
+        if: steps.sparkle-key.outputs.has_key == 'true'
+        run: |
+          DMG_PATH="${{ steps.rename-dmg.outputs.dmg_path }}"
+          SIZE=$(stat -f%z "$DMG_PATH")
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+          # Extract signature from generated appcast
+          if [ -f "releases/appcast/appcast.xml" ]; then
+            # Use grep with || true to avoid pipefail failure when no match exists
+            SIG=$(grep -oE 'sparkle:edSignature="[^"]+"' releases/appcast/appcast.xml 2>/dev/null | head -1 | sed 's/sparkle:edSignature="//;s/"$//' || true)
+            if [ -n "$SIG" ]; then
+              echo "signature=$SIG" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ No EdDSA signature found in appcast.xml"
+            fi
+          fi
+
+          # Get minimum system version from Info.plist
+          MIN_SYS=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "build/export/Claude Island.app/Contents/Info.plist" 2>/dev/null || echo "15.6")
+          echo "min_system=$MIN_SYS" >> $GITHUB_OUTPUT
+
+      - name: Output build info
+        if: steps.sparkle-key.outputs.has_key == 'true'
+        run: |
+          echo "### Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- DMG Size: ${{ steps.dmg-info.outputs.size }} bytes" >> $GITHUB_STEP_SUMMARY
+          echo "- Has Signature: ${{ steps.dmg-info.outputs.signature != '' }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-dmg
+          path: releases/ClaudeIsland-${{ steps.version.outputs.version }}.dmg
+          retention-days: 7
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: releases/ClaudeIsland-${{ steps.version.outputs.version }}.dmg
+          generate_release_notes: true
+
+      - name: Upload appcast artifact
+        if: steps.sparkle-key.outputs.has_key == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: appcast
+          path: releases/appcast/appcast.xml
+
+  virustotal-scan:
+    name: VirusTotal Scan
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download DMG artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: release-dmg
+
+      - name: Scan with VirusTotal
+        uses: crazy-max/ghaction-virustotal@v4
+        id: virustotal
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          request_rate: 4
+          files: |
+            *.dmg
+
+      - name: Create scan results summary
+        run: |
+          # Build the markdown content
+          {
+            echo "### 🛡️ VirusTotal Scan Results"
+            echo ""
+            echo "**Scan completed:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo ""
+            echo "#### Analysis Reports"
+            echo ""
+            echo "| File | Report |"
+            echo "|------|--------|"
+            # Output format is comma-separated "filename=url" pairs
+            IFS=',' read -ra PAIRS <<< "${{ steps.virustotal.outputs.analysis }}"
+            for pair in "${PAIRS[@]}"; do
+              filename="${pair%%=*}"
+              url="${pair#*=}"
+              echo "| 📦 \`${filename}\` | [View VirusTotal Report](${url}) |"
+            done
+            echo ""
+            echo "---"
+            echo ""
+            echo "_Click the links above to view full analysis on VirusTotal._"
+          } | tee virustotal-results.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Append VirusTotal results to release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+
+          # Fetch current release body
+          gh release view "$VERSION" --json body --jq '.body' > current-body.md
+
+          # Combine current body with VirusTotal results
+          {
+            cat current-body.md
+            echo ""
+            cat virustotal-results.md
+          } > updated-body.md
+
+          # Update the release
+          gh release edit "$VERSION" --notes-file updated-body.md
+          echo "✅ VirusTotal results appended to release v$VERSION"
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v6
+        with:
+          name: virustotal-results
+          path: virustotal-results.md
+          retention-days: 90
+
+  update-website:
+    name: Update Website Appcast
+    needs: build
+    runs-on: ubuntu-latest
+    # Only run if Sparkle signing was configured AND signature was actually generated
+    if: needs.build.outputs.has_sparkle == 'true' && needs.build.outputs.ed_signature != ''
+
+    steps:
+      - name: Trigger website appcast update
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ secrets.WEBSITE_PAT }}
+          repository: engels74/claude-island-web
+          event-type: update-appcast
+          client-payload: |
+            {
+              "version": "${{ needs.build.outputs.version }}",
+              "build_number": "${{ needs.build.outputs.build_number }}",
+              "download_url": "https://github.com/engels74/claude-island/releases/download/${{ needs.build.outputs.version }}/ClaudeIsland-${{ needs.build.outputs.version }}.dmg",
+              "ed_signature": "${{ needs.build.outputs.ed_signature }}",
+              "file_size": "${{ needs.build.outputs.dmg_size }}",
+              "min_system_version": "${{ needs.build.outputs.min_system }}"
+            }

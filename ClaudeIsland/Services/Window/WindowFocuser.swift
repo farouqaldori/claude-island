@@ -9,9 +9,13 @@ import Foundation
 
 /// Focuses windows using yabai
 actor WindowFocuser {
-    static let shared = WindowFocuser()
+    // MARK: Lifecycle
 
     private init() {}
+
+    // MARK: Internal
+
+    static let shared = WindowFocuser()
 
     /// Focus a window by ID
     func focusWindow(id: Int) async -> Bool {
@@ -19,7 +23,7 @@ actor WindowFocuser {
 
         do {
             _ = try await ProcessExecutor.shared.run(yabaiPath, arguments: [
-                "-m", "window", "--focus", String(id)
+                "-m", "window", "--focus", String(id),
             ])
             return true
         } catch {
@@ -28,15 +32,15 @@ actor WindowFocuser {
     }
 
     /// Focus the tmux window for a terminal
-    func focusTmuxWindow(terminalPid: Int, windows: [YabaiWindow]) async -> Bool {
+    func focusTmuxWindow(terminalPID: Int, windows: [YabaiWindow]) async -> Bool {
         // Try to find actual tmux window
-        if let tmuxWindow = WindowFinder.shared.findTmuxWindow(forTerminalPid: terminalPid, windows: windows) {
-            return await focusWindow(id: tmuxWindow.id)
+        if let tmuxWindow = WindowFinder.shared.findTmuxWindow(forTerminalPID: terminalPID, windows: windows) {
+            return await self.focusWindow(id: tmuxWindow.id)
         }
 
         // Fall back to any non-Claude window
-        if let window = WindowFinder.shared.findNonClaudeWindow(forTerminalPid: terminalPid, windows: windows) {
-            return await focusWindow(id: window.id)
+        if let window = WindowFinder.shared.findNonClaudeWindow(forTerminalPID: terminalPID, windows: windows) {
+            return await self.focusWindow(id: window.id)
         }
 
         return false

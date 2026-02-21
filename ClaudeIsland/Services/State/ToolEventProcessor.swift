@@ -9,52 +9,52 @@
 import Foundation
 import os.log
 
-/// Logger for tool events
-private let logger = Logger(subsystem: "com.claudeisland", category: "ToolEvents")
+// MARK: - ToolEventProcessor
 
 /// Processes tool-related events and updates session state
 enum ToolEventProcessor {
+    // MARK: Internal
 
     // MARK: - Tool Tracking
 
     /// Process PreToolUse event for tool tracking
     static func processPreToolUse(
         event: HookEvent,
-        session: inout SessionState
+        session: inout SessionState,
     ) {
-        guard let toolUseId = event.toolUseId, let toolName = event.tool else { return }
+        guard let toolUseID = event.toolUseID, let toolName = event.tool else { return }
 
-        session.toolTracker.startTool(id: toolUseId, name: toolName)
+        session.toolTracker.startTool(id: toolUseID, name: toolName)
 
-        let toolExists = session.chatItems.contains { $0.id == toolUseId }
+        let toolExists = session.chatItems.contains { $0.id == toolUseID }
         if !toolExists {
-            let input = extractToolInput(from: event.toolInput)
+            let input = self.extractToolInput(from: event.toolInput)
             let placeholderItem = ChatHistoryItem(
-                id: toolUseId,
+                id: toolUseID,
                 type: .toolCall(ToolCallItem(
                     name: toolName,
                     input: input,
                     status: .running,
                     result: nil,
                     structuredResult: nil,
-                    subagentTools: []
+                    subagentTools: [],
                 )),
-                timestamp: Date()
+                timestamp: Date(),
             )
             session.chatItems.append(placeholderItem)
-            logger.debug("Created placeholder tool entry for \(toolUseId.prefix(16), privacy: .public)")
+            Self.logger.debug("Created placeholder tool entry for \(toolUseID.prefix(16), privacy: .public)")
         }
     }
 
     /// Process PostToolUse event for tool tracking
     static func processPostToolUse(
         event: HookEvent,
-        session: inout SessionState
+        session: inout SessionState,
     ) {
-        guard let toolUseId = event.toolUseId else { return }
+        guard let toolUseID = event.toolUseID else { return }
 
-        session.toolTracker.completeTool(id: toolUseId, success: true)
-        updateToolStatus(in: &session, toolId: toolUseId, status: .success)
+        session.toolTracker.completeTool(id: toolUseID, success: true)
+        self.updateToolStatus(in: &session, toolID: toolUseID, status: .success)
     }
 
     // MARK: - Subagent Tracking
@@ -62,22 +62,22 @@ enum ToolEventProcessor {
     /// Process PreToolUse event for subagent tracking
     static func processSubagentPreToolUse(
         event: HookEvent,
-        session: inout SessionState
+        session: inout SessionState,
     ) {
-        guard let toolUseId = event.toolUseId else { return }
+        guard let toolUseID = event.toolUseID else { return }
 
         if event.tool == "Task" {
-            session.subagentState.startTask(taskToolId: toolUseId)
-            logger.debug("Started Task subagent tracking: \(toolUseId.prefix(12), privacy: .public)")
+            session.subagentState.startTask(taskToolID: toolUseID)
+            Self.logger.debug("Started Task subagent tracking: \(toolUseID.prefix(12), privacy: .public)")
         } else if let toolName = event.tool, session.subagentState.hasActiveSubagent {
-            logger.debug("Adding subagent tool \(toolName, privacy: .public) to active Task")
-            let input = extractToolInput(from: event.toolInput)
+            Self.logger.debug("Adding subagent tool \(toolName, privacy: .public) to active Task")
+            let input = self.extractToolInput(from: event.toolInput)
             let subagentTool = SubagentToolCall(
-                id: toolUseId,
+                id: toolUseID,
                 name: toolName,
                 input: input,
                 status: .running,
-                timestamp: Date()
+                timestamp: Date(),
             )
             session.subagentState.addSubagentTool(subagentTool)
         }
@@ -86,42 +86,40 @@ enum ToolEventProcessor {
     /// Process PostToolUse event for subagent tracking
     static func processSubagentPostToolUse(
         event: HookEvent,
-        session: inout SessionState
+        session: inout SessionState,
     ) {
-        guard let toolUseId = event.toolUseId else { return }
+        guard let toolUseID = event.toolUseID else { return }
 
         if event.tool == "Task" {
-            if let taskContext = session.subagentState.activeTasks[toolUseId] {
-                logger.debug("Task completing with \(taskContext.subagentTools.count) subagent tools")
-                attachSubagentToolsToTask(
+            if let taskContext = session.subagentState.activeTasks[toolUseID] {
+                Self.logger.debug("Task completing with \(taskContext.subagentTools.count) subagent tools")
+                self.attachSubagentToolsToTask(
                     session: &session,
-                    taskToolId: toolUseId,
-                    subagentTools: taskContext.subagentTools
+                    taskToolID: toolUseID,
+                    subagentTools: taskContext.subagentTools,
                 )
             } else {
-                logger.debug("Task completing but no taskContext found for \(toolUseId.prefix(12), privacy: .public)")
+                Self.logger.debug("Task completing but no taskContext found for \(toolUseID.prefix(12), privacy: .public)")
             }
-            session.subagentState.stopTask(taskToolId: toolUseId)
+            session.subagentState.stopTask(taskToolID: toolUseID)
         } else {
-            session.subagentState.updateSubagentToolStatus(toolId: toolUseId, status: .success)
+            session.subagentState.updateSubagentToolStatus(toolID: toolUseID, status: .success)
         }
     }
 
     /// Transfer all active subagent tools before stop/interrupt
     static func transferAllSubagentTools(session: inout SessionState, markAsInterrupted: Bool = false) {
-        for (taskId, taskContext) in session.subagentState.activeTasks {
+        for (taskID, taskContext) in session.subagentState.activeTasks {
             var tools = taskContext.subagentTools
             if markAsInterrupted {
-                for i in 0..<tools.count {
-                    if tools[i].status == .running {
-                        tools[i].status = .interrupted
-                    }
+                for index in 0 ..< tools.count where tools[index].status == .running {
+                    tools[index].status = .interrupted
                 }
             }
-            attachSubagentToolsToTask(
+            self.attachSubagentToolsToTask(
                 session: &session,
-                taskToolId: taskId,
-                subagentTools: tools
+                taskToolID: taskID,
+                subagentTools: tools,
             )
         }
         session.subagentState = SubagentState()
@@ -132,34 +130,34 @@ enum ToolEventProcessor {
     /// Update tool status in session's chat items
     static func updateToolStatus(
         in session: inout SessionState,
-        toolId: String,
-        status: ToolStatus
+        toolID: String,
+        status: ToolStatus,
     ) {
-        for i in 0..<session.chatItems.count {
-            if session.chatItems[i].id == toolId,
-               case .toolCall(var tool) = session.chatItems[i].type,
+        for i in 0 ..< session.chatItems.count {
+            if session.chatItems[i].id == toolID,
+               case var .toolCall(tool) = session.chatItems[i].type,
                tool.status == .waitingForApproval || tool.status == .running {
                 tool.status = status
                 session.chatItems[i] = ChatHistoryItem(
-                    id: toolId,
+                    id: toolID,
                     type: .toolCall(tool),
-                    timestamp: session.chatItems[i].timestamp
+                    timestamp: session.chatItems[i].timestamp,
                 )
                 return
             }
         }
         let count = session.chatItems.count
-        logger.warning("Tool \(toolId.prefix(16), privacy: .public) not found in chatItems (count: \(count))")
+        Self.logger.warning("Tool \(toolID.prefix(16), privacy: .public) not found in chatItems (count: \(count))")
     }
 
     /// Find the next tool waiting for approval
     static func findNextPendingTool(
         in session: SessionState,
-        excluding toolId: String
+        excluding toolID: String,
     ) -> (id: String, name: String, timestamp: Date)? {
         for item in session.chatItems {
-            if item.id == toolId { continue }
-            if case .toolCall(let tool) = item.type, tool.status == .waitingForApproval {
+            if item.id == toolID { continue }
+            if case let .toolCall(tool) = item.type, tool.status == .waitingForApproval {
                 return (id: item.id, name: tool.name, timestamp: item.timestamp)
             }
         }
@@ -168,55 +166,59 @@ enum ToolEventProcessor {
 
     /// Mark all running tools as interrupted
     static func markRunningToolsInterrupted(session: inout SessionState) {
-        for i in 0..<session.chatItems.count {
-            if case .toolCall(var tool) = session.chatItems[i].type,
+        for i in 0 ..< session.chatItems.count {
+            if case var .toolCall(tool) = session.chatItems[i].type,
                tool.status == .running {
                 tool.status = .interrupted
                 session.chatItems[i] = ChatHistoryItem(
                     id: session.chatItems[i].id,
                     type: .toolCall(tool),
-                    timestamp: session.chatItems[i].timestamp
+                    timestamp: session.chatItems[i].timestamp,
                 )
             }
         }
     }
+
+    // MARK: Private
+
+    private nonisolated static let logger = Logger(subsystem: "com.engels74.ClaudeIsland", category: "ToolEvents")
 
     // MARK: - Private Helpers
 
     /// Attach subagent tools to a Task's ChatHistoryItem
     private static func attachSubagentToolsToTask(
         session: inout SessionState,
-        taskToolId: String,
-        subagentTools: [SubagentToolCall]
+        taskToolID: String,
+        subagentTools: [SubagentToolCall],
     ) {
         guard !subagentTools.isEmpty else { return }
 
-        for i in 0..<session.chatItems.count {
-            if session.chatItems[i].id == taskToolId,
-               case .toolCall(var tool) = session.chatItems[i].type {
+        for i in 0 ..< session.chatItems.count {
+            if session.chatItems[i].id == taskToolID,
+               case var .toolCall(tool) = session.chatItems[i].type {
                 tool.subagentTools = subagentTools
                 session.chatItems[i] = ChatHistoryItem(
-                    id: taskToolId,
+                    id: taskToolID,
                     type: .toolCall(tool),
-                    timestamp: session.chatItems[i].timestamp
+                    timestamp: session.chatItems[i].timestamp,
                 )
-                logger.debug("Attached \(subagentTools.count) subagent tools to Task \(taskToolId.prefix(12), privacy: .public)")
+                self.logger.debug("Attached \(subagentTools.count) subagent tools to Task \(taskToolID.prefix(12), privacy: .public)")
                 break
             }
         }
     }
 
-    /// Extract tool input from AnyCodable dictionary
-    private static func extractToolInput(from hookInput: [String: AnyCodable]?) -> [String: String] {
+    /// Extract tool input from JSONValue dictionary
+    private static func extractToolInput(from hookInput: [String: JSONValue]?) -> [String: String] {
         var input: [String: String] = [:]
-        guard let hookInput = hookInput else { return input }
+        guard let hookInput else { return input }
 
         for (key, value) in hookInput {
-            if let str = value.value as? String {
+            if let str = value.stringValue {
                 input[key] = str
-            } else if let num = value.value as? Int {
+            } else if let num = value.intValue {
                 input[key] = String(num)
-            } else if let bool = value.value as? Bool {
+            } else if let bool = value.boolValue {
                 input[key] = bool ? "true" : "false"
             }
         }

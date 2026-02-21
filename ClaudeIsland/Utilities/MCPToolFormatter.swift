@@ -7,23 +7,8 @@
 
 import Foundation
 
-struct MCPToolFormatter {
-
-    /// Tool aliases for friendlier display names
-    private static let toolAliases: [String: String] = [
-        "AgentOutputTool": "Await Agent",
-        "AskUserQuestion": "Question",
-        "TodoWrite": "Todo",
-        "TodoRead": "Todo",
-        "WebFetch": "Fetch",
-        "WebSearch": "Search",
-        "NotebookEdit": "Notebook",
-        "BashOutput": "Bash",
-        "KillShell": "Shell",
-        "EnterPlanMode": "Plan",
-        "ExitPlanMode": "Plan",
-        "SlashCommand": "Command",
-    ]
+nonisolated enum MCPToolFormatter {
+    // MARK: Internal
 
     /// Checks if tool name is in MCP format (e.g., "mcp__deepwiki__ask_question")
     static func isMCPTool(_ name: String) -> Bool {
@@ -42,28 +27,28 @@ struct MCPToolFormatter {
     /// Formats MCP tool ID to human-readable format
     /// e.g., "mcp__deepwiki__ask_question" → "Deepwiki - Ask Question"
     /// Returns alias if available, otherwise original name
-    static func formatToolName(_ toolId: String) -> String {
+    static func formatToolName(_ toolID: String) -> String {
         // Check for alias first
-        if let alias = toolAliases[toolId] {
+        if let alias = toolAliases[toolID] {
             return alias
         }
 
-        guard isMCPTool(toolId) else { return toolId }
+        guard self.isMCPTool(toolID) else { return toolID }
 
         // Remove "mcp__" prefix and split by "__"
-        let withoutPrefix = String(toolId.dropFirst(5)) // Drop "mcp__"
+        let withoutPrefix = String(toolID.dropFirst(5)) // Drop "mcp__"
         let parts = withoutPrefix.split(separator: "_", maxSplits: 1, omittingEmptySubsequences: true)
 
-        guard parts.count >= 1 else { return toolId }
+        guard parts.count >= 1 else { return toolID }
 
-        let serverName = toTitleCase(String(parts[0]))
+        let serverName = self.toTitleCase(String(parts[0]))
 
         if parts.count >= 2 {
             // The second part starts with "_" which we need to drop
             let toolNameRaw = String(parts[1]).hasPrefix("_")
                 ? String(String(parts[1]).dropFirst())
                 : String(parts[1])
-            let toolName = toTitleCase(toolNameRaw)
+            let toolName = self.toTitleCase(toolNameRaw)
             return "\(serverName) - \(toolName)"
         }
 
@@ -82,11 +67,10 @@ struct MCPToolFormatter {
         for key in sortedKeys.prefix(maxArgs) {
             guard let value = input[key] else { continue }
 
-            let truncatedValue: String
-            if value.count > maxValueLength {
-                truncatedValue = String(value.prefix(maxValueLength)) + "..."
+            let truncatedValue: String = if value.count > maxValueLength {
+                String(value.prefix(maxValueLength)) + "..."
             } else {
-                truncatedValue = value
+                value
             }
 
             formattedParts.append("\(key): \"\(truncatedValue)\"")
@@ -111,22 +95,20 @@ struct MCPToolFormatter {
         for key in sortedKeys.prefix(maxArgs) {
             guard let value = input[key] else { continue }
 
-            let stringValue: String
-            if let str = value as? String {
-                stringValue = str
+            let stringValue: String = if let str = value as? String {
+                str
             } else if let num = value as? NSNumber {
-                stringValue = num.stringValue
+                num.stringValue
             } else if let bool = value as? Bool {
-                stringValue = bool ? "true" : "false"
+                bool ? "true" : "false"
             } else {
-                stringValue = String(describing: value)
+                String(describing: value)
             }
 
-            let truncatedValue: String
-            if stringValue.count > maxValueLength {
-                truncatedValue = String(stringValue.prefix(maxValueLength)) + "..."
+            let truncatedValue: String = if stringValue.count > maxValueLength {
+                String(stringValue.prefix(maxValueLength)) + "..."
             } else {
-                truncatedValue = stringValue
+                stringValue
             }
 
             formattedParts.append("\(key): \"\(truncatedValue)\"")
@@ -140,4 +122,22 @@ struct MCPToolFormatter {
 
         return result
     }
+
+    // MARK: Private
+
+    /// Tool aliases for friendlier display names
+    private static let toolAliases: [String: String] = [
+        "AgentOutputTool": "Await Agent",
+        "AskUserQuestion": "Question",
+        "TodoWrite": "Todo",
+        "TodoRead": "Todo",
+        "WebFetch": "Fetch",
+        "WebSearch": "Search",
+        "NotebookEdit": "Notebook",
+        "BashOutput": "Bash",
+        "KillShell": "Shell",
+        "EnterPlanMode": "Plan",
+        "ExitPlanMode": "Plan",
+        "SlashCommand": "Command",
+    ]
 }

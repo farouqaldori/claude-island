@@ -8,12 +8,60 @@
 
 import Foundation
 
+// MARK: - SessionState
+
 /// Complete state for a single Claude session
 /// This is the single source of truth - all state reads and writes go through SessionStore
-struct SessionState: Equatable, Identifiable, Sendable {
+nonisolated struct SessionState: Equatable, Identifiable, Sendable {
+    // MARK: Lifecycle
+
+    // MARK: - Initialization
+
+    nonisolated init(
+        sessionID: String,
+        cwd: String,
+        projectName: String? = nil,
+        pid: Int? = nil,
+        tty: String? = nil,
+        isInTmux: Bool = false,
+        phase: SessionPhase = .idle,
+        chatItems: [ChatHistoryItem] = [],
+        toolTracker: ToolTracker = ToolTracker(),
+        subagentState: SubagentState = SubagentState(),
+        conversationInfo: ConversationInfo = ConversationInfo(
+            summary: nil,
+            lastMessage: nil,
+            lastMessageRole: nil,
+            lastToolName: nil,
+            firstUserMessage: nil,
+            lastUserMessageDate: nil,
+            usage: nil,
+        ),
+        needsClearReconciliation: Bool = false,
+        lastActivity: Date = Date(),
+        createdAt: Date = Date(),
+    ) {
+        self.sessionID = sessionID
+        self.cwd = cwd
+        self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
+        self.pid = pid
+        self.tty = tty
+        self.isInTmux = isInTmux
+        self.phase = phase
+        self.chatItems = chatItems
+        self.toolTracker = toolTracker
+        self.subagentState = subagentState
+        self.conversationInfo = conversationInfo
+        self.needsClearReconciliation = needsClearReconciliation
+        self.lastActivity = lastActivity
+        self.createdAt = createdAt
+    }
+
+    // MARK: Internal
+
     // MARK: - Identity
 
-    let sessionId: String
+    let sessionID: String
     let cwd: String
     let projectName: String
 
@@ -60,55 +108,20 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     // MARK: - Identifiable
 
-    var id: String { sessionId }
-
-    // MARK: - Initialization
-
-    nonisolated init(
-        sessionId: String,
-        cwd: String,
-        projectName: String? = nil,
-        pid: Int? = nil,
-        tty: String? = nil,
-        isInTmux: Bool = false,
-        phase: SessionPhase = .idle,
-        chatItems: [ChatHistoryItem] = [],
-        toolTracker: ToolTracker = ToolTracker(),
-        subagentState: SubagentState = SubagentState(),
-        conversationInfo: ConversationInfo = ConversationInfo(
-            summary: nil, lastMessage: nil, lastMessageRole: nil,
-            lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
-        ),
-        needsClearReconciliation: Bool = false,
-        lastActivity: Date = Date(),
-        createdAt: Date = Date()
-    ) {
-        self.sessionId = sessionId
-        self.cwd = cwd
-        self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
-        self.pid = pid
-        self.tty = tty
-        self.isInTmux = isInTmux
-        self.phase = phase
-        self.chatItems = chatItems
-        self.toolTracker = toolTracker
-        self.subagentState = subagentState
-        self.conversationInfo = conversationInfo
-        self.needsClearReconciliation = needsClearReconciliation
-        self.lastActivity = lastActivity
-        self.createdAt = createdAt
+    var id: String {
+        self.sessionID
     }
 
     // MARK: - Derived Properties
 
     /// Whether this session needs user attention
     var needsAttention: Bool {
-        phase.needsAttention
+        self.phase.needsAttention
     }
 
     /// The active permission context, if any
     var activePermission: PermissionContext? {
-        if case .waitingForApproval(let ctx) = phase {
+        if case let .waitingForApproval(ctx) = phase {
             return ctx
         }
         return nil
@@ -116,84 +129,105 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     // MARK: - UI Convenience Properties
 
-    /// Stable identity for SwiftUI (combines PID and sessionId for animation stability)
-    var stableId: String {
-        if let pid = pid {
-            return "\(pid)-\(sessionId)"
+    /// Stable identity for SwiftUI (combines PID and sessionID for animation stability)
+    var stableID: String {
+        if let pid {
+            return "\(pid)-\(self.sessionID)"
         }
-        return sessionId
+        return self.sessionID
     }
 
     /// Display title: summary > first user message > project name
     var displayTitle: String {
-        conversationInfo.summary ?? conversationInfo.firstUserMessage ?? projectName
+        self.conversationInfo.summary ?? self.conversationInfo.firstUserMessage ?? self.projectName
     }
 
     /// Best hint for matching window title
     var windowHint: String {
-        conversationInfo.summary ?? projectName
+        self.conversationInfo.summary ?? self.projectName
     }
 
     /// Pending tool name if waiting for approval
     var pendingToolName: String? {
-        activePermission?.toolName
+        self.activePermission?.toolName
     }
 
     /// Pending tool use ID
-    var pendingToolId: String? {
-        activePermission?.toolUseId
+    var pendingToolID: String? {
+        self.activePermission?.toolUseID
     }
 
     /// Formatted pending tool input for display
     var pendingToolInput: String? {
-        activePermission?.formattedInput
+        self.activePermission?.formattedInput
     }
 
     /// Last message content
     var lastMessage: String? {
-        conversationInfo.lastMessage
+        self.conversationInfo.lastMessage
     }
 
     /// Last message role
     var lastMessageRole: String? {
-        conversationInfo.lastMessageRole
+        self.conversationInfo.lastMessageRole
     }
 
     /// Last tool name
     var lastToolName: String? {
-        conversationInfo.lastToolName
+        self.conversationInfo.lastToolName
     }
 
     /// Summary
     var summary: String? {
-        conversationInfo.summary
+        self.conversationInfo.summary
     }
 
     /// First user message
     var firstUserMessage: String? {
-        conversationInfo.firstUserMessage
+        self.conversationInfo.firstUserMessage
     }
 
     /// Last user message date
     var lastUserMessageDate: Date? {
-        conversationInfo.lastUserMessageDate
+        self.conversationInfo.lastUserMessageDate
+    }
+
+    /// Token usage for this session
+    var usage: UsageInfo? {
+        self.conversationInfo.usage
     }
 
     /// Whether the session can be interacted with
     var canInteract: Bool {
-        phase.needsAttention
+        self.phase.needsAttention
     }
 }
 
-// MARK: - Tool Tracker
+// MARK: - ToolTracker
 
 /// Unified tool tracking - replaces multiple dictionaries in ChatHistoryManager
-struct ToolTracker: Equatable, Sendable {
+nonisolated struct ToolTracker: Equatable, Sendable {
+    // MARK: Lifecycle
+
+    nonisolated init(
+        inProgress: [String: ToolInProgress] = [:],
+        seenIDs: Set<String> = [],
+        lastSyncOffset: UInt64 = 0,
+        lastSyncTime: Date? = nil,
+    ) {
+        self.inProgress = inProgress
+        self.seenIDs = seenIDs
+        self.lastSyncOffset = lastSyncOffset
+        self.lastSyncTime = lastSyncTime
+    }
+
+    // MARK: Internal
+
     /// Tools currently in progress, keyed by tool_use_id
     var inProgress: [String: ToolInProgress]
 
     /// All tool IDs we've seen (for deduplication)
-    var seenIds: Set<String>
+    var seenIDs: Set<String>
 
     /// Last JSONL file offset for incremental parsing
     var lastSyncOffset: UInt64
@@ -201,73 +235,57 @@ struct ToolTracker: Equatable, Sendable {
     /// Last sync timestamp
     var lastSyncTime: Date?
 
-    nonisolated init(
-        inProgress: [String: ToolInProgress] = [:],
-        seenIds: Set<String> = [],
-        lastSyncOffset: UInt64 = 0,
-        lastSyncTime: Date? = nil
-    ) {
-        self.inProgress = inProgress
-        self.seenIds = seenIds
-        self.lastSyncOffset = lastSyncOffset
-        self.lastSyncTime = lastSyncTime
-    }
-
     /// Mark a tool ID as seen, returns true if it was new
     nonisolated mutating func markSeen(_ id: String) -> Bool {
-        seenIds.insert(id).inserted
+        self.seenIDs.insert(id).inserted
     }
 
     /// Check if a tool ID has been seen
     nonisolated func hasSeen(_ id: String) -> Bool {
-        seenIds.contains(id)
+        self.seenIDs.contains(id)
     }
 
     /// Start tracking a tool
     nonisolated mutating func startTool(id: String, name: String) {
-        guard markSeen(id) else { return }
-        inProgress[id] = ToolInProgress(
+        guard self.markSeen(id) else { return }
+        self.inProgress[id] = ToolInProgress(
             id: id,
             name: name,
             startTime: Date(),
-            phase: .running
+            phase: .running,
         )
     }
 
     /// Complete a tool
     nonisolated mutating func completeTool(id: String, success: Bool) {
-        inProgress.removeValue(forKey: id)
+        self.inProgress.removeValue(forKey: id)
     }
 }
 
+// MARK: - ToolInProgress
+
 /// A tool currently in progress
-struct ToolInProgress: Equatable, Sendable {
+nonisolated struct ToolInProgress: Equatable, Sendable {
     let id: String
     let name: String
     let startTime: Date
     var phase: ToolInProgressPhase
 }
 
+// MARK: - ToolInProgressPhase
+
 /// Phase of a tool in progress
-enum ToolInProgressPhase: Equatable, Sendable {
+nonisolated enum ToolInProgressPhase: Equatable, Sendable {
     case starting
     case running
     case pendingApproval
 }
 
-// MARK: - Subagent State
+// MARK: - SubagentState
 
 /// State for Task (subagent) tools
-struct SubagentState: Equatable, Sendable {
-    /// Active Task tools, keyed by task tool_use_id
-    var activeTasks: [String: TaskContext]
-
-    /// Ordered stack of active task IDs (most recent last) - used for proper tool assignment
-    /// When multiple Tasks run in parallel, we use insertion order rather than timestamps
-    var taskStack: [String]
-
-    /// Mapping of agentId to Task description (for AgentOutputTool display)
-    var agentDescriptions: [String: String]
+nonisolated struct SubagentState: Equatable, Sendable {
+    // MARK: Lifecycle
 
     nonisolated init(activeTasks: [String: TaskContext] = [:], taskStack: [String] = [], agentDescriptions: [String: String] = [:]) {
         self.activeTasks = activeTasks
@@ -275,71 +293,86 @@ struct SubagentState: Equatable, Sendable {
         self.agentDescriptions = agentDescriptions
     }
 
+    // MARK: Internal
+
+    /// Active Task tools, keyed by task tool_use_id
+    var activeTasks: [String: TaskContext]
+
+    /// Ordered stack of active task IDs (most recent last) - used for proper tool assignment
+    /// When multiple Tasks run in parallel, we use insertion order rather than timestamps
+    var taskStack: [String]
+
+    /// Mapping of agentID to Task description (for AgentOutputTool display)
+    var agentDescriptions: [String: String]
+
     /// Whether there's an active subagent
     nonisolated var hasActiveSubagent: Bool {
-        !activeTasks.isEmpty
+        !self.activeTasks.isEmpty
     }
 
     /// Start tracking a Task tool
-    nonisolated mutating func startTask(taskToolId: String, description: String? = nil) {
-        activeTasks[taskToolId] = TaskContext(
-            taskToolId: taskToolId,
+    nonisolated mutating func startTask(taskToolID: String, description: String? = nil) {
+        self.activeTasks[taskToolID] = TaskContext(
+            taskToolID: taskToolID,
             startTime: Date(),
-            agentId: nil,
+            agentID: nil,
             description: description,
-            subagentTools: []
+            subagentTools: [],
         )
     }
 
     /// Stop tracking a Task tool
-    nonisolated mutating func stopTask(taskToolId: String) {
-        activeTasks.removeValue(forKey: taskToolId)
+    nonisolated mutating func stopTask(taskToolID: String) {
+        self.activeTasks.removeValue(forKey: taskToolID)
     }
 
-    /// Set the agentId for a Task (called when agent file is discovered)
-    nonisolated mutating func setAgentId(_ agentId: String, for taskToolId: String) {
-        activeTasks[taskToolId]?.agentId = agentId
-        if let description = activeTasks[taskToolId]?.description {
-            agentDescriptions[agentId] = description
+    /// Set the agentID for a Task (called when agent file is discovered)
+    nonisolated mutating func setAgentID(_ agentID: String, for taskToolID: String) {
+        self.activeTasks[taskToolID]?.agentID = agentID
+        if let description = activeTasks[taskToolID]?.description {
+            self.agentDescriptions[agentID] = description
         }
     }
 
     /// Add a subagent tool to a specific Task by ID
-    nonisolated mutating func addSubagentToolToTask(_ tool: SubagentToolCall, taskId: String) {
-        activeTasks[taskId]?.subagentTools.append(tool)
+    nonisolated mutating func addSubagentToolToTask(_ tool: SubagentToolCall, taskID: String) {
+        self.activeTasks[taskID]?.subagentTools.append(tool)
     }
 
     /// Set all subagent tools for a specific Task (used when updating from agent file)
-    nonisolated mutating func setSubagentTools(_ tools: [SubagentToolCall], for taskId: String) {
-        activeTasks[taskId]?.subagentTools = tools
+    nonisolated mutating func setSubagentTools(_ tools: [SubagentToolCall], for taskID: String) {
+        self.activeTasks[taskID]?.subagentTools = tools
     }
 
     /// Add a subagent tool to the most recent active Task
     nonisolated mutating func addSubagentTool(_ tool: SubagentToolCall) {
         // Find most recent active task (for parallel Task support)
-        guard let mostRecentTaskId = activeTasks.keys.max(by: {
+        guard let mostRecentTaskID = activeTasks.keys.max(by: {
             (activeTasks[$0]?.startTime ?? .distantPast) < (activeTasks[$1]?.startTime ?? .distantPast)
-        }) else { return }
+        })
+        else { return }
 
-        activeTasks[mostRecentTaskId]?.subagentTools.append(tool)
+        self.activeTasks[mostRecentTaskID]?.subagentTools.append(tool)
     }
 
     /// Update the status of a subagent tool across all active Tasks
-    nonisolated mutating func updateSubagentToolStatus(toolId: String, status: ToolStatus) {
-        for taskId in activeTasks.keys {
-            if let index = activeTasks[taskId]?.subagentTools.firstIndex(where: { $0.id == toolId }) {
-                activeTasks[taskId]?.subagentTools[index].status = status
+    nonisolated mutating func updateSubagentToolStatus(toolID: String, status: ToolStatus) {
+        for taskID in self.activeTasks.keys {
+            if let index = activeTasks[taskID]?.subagentTools.firstIndex(where: { $0.id == toolID }) {
+                self.activeTasks[taskID]?.subagentTools[index].status = status
                 return
             }
         }
     }
 }
 
+// MARK: - TaskContext
+
 /// Context for an active Task tool
-struct TaskContext: Equatable, Sendable {
-    let taskToolId: String
+nonisolated struct TaskContext: Equatable, Sendable {
+    let taskToolID: String
     let startTime: Date
-    var agentId: String?
+    var agentID: String?
     var description: String?
     var subagentTools: [SubagentToolCall]
 }

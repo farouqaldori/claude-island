@@ -1,0 +1,86 @@
+# SwiftFormat configuration for Claude Island
+
+# Swift version
+--swiftversion 6.2
+
+# Indentation
+--indent 4
+--tabwidth 4
+--smarttabs enabled
+--indentcase false
+--ifdef indent
+
+# Line length
+--maxwidth 150
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+--wrapreturntype preserve
+--wrapconditions after-first
+--closingparen balanced
+
+# Spacing
+--operatorfunc spaced
+--ranges spaced
+--typeattributes prev-line
+--funcattributes prev-line
+--varattributes same-line
+--storedvarattrs same-line
+--computedvarattrs same-line
+
+# Braces
+--allman false
+--elseposition same-line
+--guardelse next-line
+
+# Imports
+--importgrouping alpha
+
+# Stripping
+--stripunusedargs closure-only
+--trimwhitespace always
+
+# Semicolons
+--semicolons inline
+
+# Redundant
+--redundanttype inferred
+--self insert
+
+# Other
+--commas always
+--decimalgrouping 3,6
+--binarygrouping 4,8
+--octalgrouping 4,8
+--hexgrouping 4,8
+--hexliteralcase uppercase
+--exponentcase lowercase
+--exponentgrouping disabled
+--fractiongrouping disabled
+--fragment false
+--conflictmarkers reject
+--shortoptionals always
+--modifierorder
+
+# Acronyms to preserve
+--acronyms ID,URL,UUID,HTTP,HTTPS,JSON,API,UI,MCP,PID,JSONL,SSH,TCP,IP,DNS,HTML,XML,CSS,JS,SDK,CLI,TLS,SSL
+
+# Exclude directories and files
+# Note: HookSocketServer.swift excluded due to organizeDeclarations rule timeout (file too large/complex)
+--exclude build,DerivedData,.build,Pods,releases,*.xcodeproj,*.xcworkspace,xcuserdata,.sparkle-keys,ClaudeIsland/Services/Hooks/HookSocketServer.swift
+
+# Rules to enable
+--enable acronyms
+--enable blankLinesBetweenImports
+--enable blockComments
+--enable docComments
+--enable isEmpty
+--enable markTypes
+--enable organizeDeclarations
+--enable sortDeclarations
+--enable wrapEnumCases
+--enable wrapSwitchCases
+
+# Rules to disable (overly aggressive or conflict with project style)
+--disable andOperator
+--disable wrapMultilineStatementBraces

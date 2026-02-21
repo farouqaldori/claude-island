@@ -8,9 +8,11 @@
 
 import Foundation
 
+// MARK: - SessionEvent
+
 /// All events that can affect session state
 /// This is the single entry point for state mutations
-enum SessionEvent: Sendable {
+nonisolated enum SessionEvent: Sendable {
     // MARK: - Hook Events (from HookSocketServer)
 
     /// A hook event was received from Claude Code
@@ -19,13 +21,13 @@ enum SessionEvent: Sendable {
     // MARK: - Permission Events (user actions)
 
     /// User approved a permission request
-    case permissionApproved(sessionId: String, toolUseId: String)
+    case permissionApproved(sessionID: String, toolUseID: String)
 
     /// User denied a permission request
-    case permissionDenied(sessionId: String, toolUseId: String, reason: String?)
+    case permissionDenied(sessionID: String, toolUseID: String, reason: String?)
 
     /// Permission socket failed (connection died before response)
-    case permissionSocketFailed(sessionId: String, toolUseId: String)
+    case permissionSocketFailed(sessionID: String, toolUseID: String)
 
     // MARK: - File Events (from ConversationParser)
 
@@ -36,97 +38,112 @@ enum SessionEvent: Sendable {
 
     /// A tool was detected as completed via JSONL result
     /// This is the authoritative signal that a tool has finished
-    case toolCompleted(sessionId: String, toolUseId: String, result: ToolCompletionResult)
+    case toolCompleted(sessionID: String, toolUseID: String, result: ToolCompletionResult)
 
     // MARK: - Interrupt Events (from JSONLInterruptWatcher)
 
     /// User interrupted Claude (detected via JSONL)
-    case interruptDetected(sessionId: String)
+    case interruptDetected(sessionID: String)
 
     // MARK: - Subagent Events (Task tool tracking)
 
     /// A Task (subagent) tool has started
-    case subagentStarted(sessionId: String, taskToolId: String)
+    case subagentStarted(sessionID: String, taskToolID: String)
 
     /// A tool was executed within an active subagent
-    case subagentToolExecuted(sessionId: String, tool: SubagentToolCall)
+    case subagentToolExecuted(sessionID: String, tool: SubagentToolCall)
 
     /// A subagent tool completed (status update)
-    case subagentToolCompleted(sessionId: String, toolId: String, status: ToolStatus)
+    case subagentToolCompleted(sessionID: String, toolID: String, status: ToolStatus)
 
     /// A Task (subagent) tool has stopped
-    case subagentStopped(sessionId: String, taskToolId: String)
+    case subagentStopped(sessionID: String, taskToolID: String)
 
     /// Agent file was updated with new subagent tools (from AgentFileWatcher)
-    case agentFileUpdated(sessionId: String, taskToolId: String, tools: [SubagentToolInfo])
+    case agentFileUpdated(sessionID: String, taskToolID: String, tools: [SubagentToolInfo])
 
     // MARK: - Clear Events (from JSONL detection)
 
     /// User issued /clear command - reset UI state while keeping session alive
-    case clearDetected(sessionId: String)
+    case clearDetected(sessionID: String)
 
     // MARK: - Session Lifecycle
 
     /// Session has ended
-    case sessionEnded(sessionId: String)
+    case sessionEnded(sessionID: String)
 
     /// Request to load initial history from file
-    case loadHistory(sessionId: String, cwd: String)
+    case loadHistory(sessionID: String, cwd: String)
 
     /// History load completed
-    case historyLoaded(sessionId: String, messages: [ChatMessage], completedTools: Set<String>, toolResults: [String: ConversationParser.ToolResult], structuredResults: [String: ToolResultData], conversationInfo: ConversationInfo)
+    case historyLoaded(HistoryLoadedPayload)
 }
 
+// MARK: - HistoryLoadedPayload
+
+/// Payload for history loaded events
+nonisolated struct HistoryLoadedPayload: Sendable {
+    let sessionID: String
+    let messages: [ChatMessage]
+    let completedTools: Set<String>
+    let toolResults: [String: ConversationParser.ToolResult]
+    let structuredResults: [String: ToolResultData]
+    let conversationInfo: ConversationInfo
+}
+
+// MARK: - FileUpdatePayload
+
 /// Payload for file update events
-struct FileUpdatePayload: Sendable {
-    let sessionId: String
+nonisolated struct FileUpdatePayload: Sendable {
+    let sessionID: String
     let cwd: String
     /// Messages to process - either only new messages (if isIncremental) or all messages
     let messages: [ChatMessage]
     /// When true, messages contains only NEW messages since last update
     /// When false, messages contains ALL messages (used for initial load or after /clear)
     let isIncremental: Bool
-    let completedToolIds: Set<String>
+    let completedToolIDs: Set<String>
     let toolResults: [String: ConversationParser.ToolResult]
     let structuredResults: [String: ToolResultData]
 }
 
+// MARK: - ToolCompletionResult
+
 /// Result of a tool completion detected from JSONL
-struct ToolCompletionResult: Sendable {
+nonisolated struct ToolCompletionResult: Sendable {
     let status: ToolStatus
     let result: String?
     let structuredResult: ToolResultData?
 
-    nonisolated static func from(parserResult: ConversationParser.ToolResult?, structuredResult: ToolResultData?) -> ToolCompletionResult {
-        let status: ToolStatus
-        if parserResult?.isInterrupted == true {
-            status = .interrupted
+    nonisolated static func from(parserResult: ConversationParser.ToolResult?, structuredResult: ToolResultData?) -> Self {
+        let status: ToolStatus = if parserResult?.isInterrupted == true {
+            .interrupted
         } else if parserResult?.isError == true {
-            status = .error
+            .error
         } else {
-            status = .success
+            .success
         }
 
-        var resultText: String? = nil
-        if let r = parserResult {
-            if !r.isInterrupted {
-                if let stdout = r.stdout, !stdout.isEmpty {
+        var resultText: String?
+        if let parsedResult = parserResult {
+            if !parsedResult.isInterrupted {
+                if let stdout = parsedResult.stdout, !stdout.isEmpty {
                     resultText = stdout
-                } else if let stderr = r.stderr, !stderr.isEmpty {
+                } else if let stderr = parsedResult.stderr, !stderr.isEmpty {
                     resultText = stderr
-                } else if let content = r.content, !content.isEmpty {
+                } else if let content = parsedResult.content, !content.isEmpty {
                     resultText = content
                 }
             }
         }
 
-        return ToolCompletionResult(status: status, result: resultText, structuredResult: structuredResult)
+        return Self(status: status, result: resultText, structuredResult: structuredResult)
     }
 }
 
 // MARK: - Hook Event Extensions
 
-extension HookEvent {
+nonisolated extension HookEvent {
     /// Determine the target session phase based on this hook event
     nonisolated func determinePhase() -> SessionPhase {
         // PreCompact takes priority
@@ -135,29 +152,41 @@ extension HookEvent {
         }
 
         // Permission request creates waitingForApproval state
-        if expectsResponse, let tool = tool {
+        if expectsResponse, let tool {
             return .waitingForApproval(PermissionContext(
-                toolUseId: toolUseId ?? "",
+                toolUseID: toolUseID ?? "",
                 toolName: tool,
                 toolInput: toolInput,
-                receivedAt: Date()
+                receivedAt: Date(),
             ))
         }
 
-        if event == "Notification" && notificationType == "idle_prompt" {
-            return .idle
+        // Handle Notification events explicitly
+        if event == "Notification" {
+            if notificationType == "idle_prompt" {
+                // idle_prompt means Claude finished and is waiting for user input
+                return .waitingForInput
+            }
+            // Other notifications - session is still processing
+            return .processing
         }
 
         switch status {
         case "waiting_for_input":
             return .waitingForInput
-        case "running_tool", "processing", "starting":
+        case "running_tool",
+             "processing",
+             "starting":
+            return .processing
+        case "notification":
+            // Explicit notification status - session is still active
             return .processing
         case "compacting":
             return .compacting
         case "ended":
             return .ended
         default:
+            // Unknown status - default to idle
             return .idle
         }
     }
@@ -170,51 +199,84 @@ extension HookEvent {
     /// Whether this event should trigger a file sync
     nonisolated var shouldSyncFile: Bool {
         switch event {
-        case "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop":
-            return true
+        case "UserPromptSubmit",
+             "PreToolUse",
+             "PostToolUse",
+             "Stop":
+            true
         default:
-            return false
+            false
         }
     }
 }
 
-// MARK: - Debug Description
+// MARK: - SessionEvent + sessionID
 
-extension SessionEvent: CustomStringConvertible {
+nonisolated extension SessionEvent {
+    /// Extract the session ID from this event (if available)
+    nonisolated var sessionID: String? {
+        switch self {
+        case let .hookReceived(event):
+            event.sessionID
+        case let .permissionApproved(sessionID, _),
+             let .permissionDenied(sessionID, _, _),
+             let .permissionSocketFailed(sessionID, _),
+             let .interruptDetected(sessionID),
+             let .clearDetected(sessionID),
+             let .sessionEnded(sessionID),
+             let .loadHistory(sessionID, _),
+             let .toolCompleted(sessionID, _, _),
+             let .subagentStarted(sessionID, _),
+             let .subagentToolExecuted(sessionID, _),
+             let .subagentToolCompleted(sessionID, _, _),
+             let .subagentStopped(sessionID, _),
+             let .agentFileUpdated(sessionID, _, _):
+            sessionID
+        case let .fileUpdated(payload):
+            payload.sessionID
+        case let .historyLoaded(payload):
+            payload.sessionID
+        }
+    }
+}
+
+// MARK: - SessionEvent + CustomStringConvertible
+
+nonisolated extension SessionEvent: CustomStringConvertible {
     nonisolated var description: String {
         switch self {
-        case .hookReceived(let event):
-            return "hookReceived(\(event.event), session: \(event.sessionId.prefix(8)))"
-        case .permissionApproved(let sessionId, let toolUseId):
-            return "permissionApproved(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
-        case .permissionDenied(let sessionId, let toolUseId, _):
-            return "permissionDenied(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
-        case .permissionSocketFailed(let sessionId, let toolUseId):
-            return "permissionSocketFailed(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)))"
-        case .fileUpdated(let payload):
-            return "fileUpdated(session: \(payload.sessionId.prefix(8)), messages: \(payload.messages.count))"
-        case .interruptDetected(let sessionId):
-            return "interruptDetected(session: \(sessionId.prefix(8)))"
-        case .clearDetected(let sessionId):
-            return "clearDetected(session: \(sessionId.prefix(8)))"
-        case .sessionEnded(let sessionId):
-            return "sessionEnded(session: \(sessionId.prefix(8)))"
-        case .loadHistory(let sessionId, _):
-            return "loadHistory(session: \(sessionId.prefix(8)))"
-        case .historyLoaded(let sessionId, let messages, _, _, _, _):
-            return "historyLoaded(session: \(sessionId.prefix(8)), messages: \(messages.count))"
-        case .toolCompleted(let sessionId, let toolUseId, let result):
-            return "toolCompleted(session: \(sessionId.prefix(8)), tool: \(toolUseId.prefix(12)), status: \(result.status))"
-        case .subagentStarted(let sessionId, let taskToolId):
-            return "subagentStarted(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)))"
-        case .subagentToolExecuted(let sessionId, let tool):
-            return "subagentToolExecuted(session: \(sessionId.prefix(8)), tool: \(tool.name))"
-        case .subagentToolCompleted(let sessionId, let toolId, let status):
-            return "subagentToolCompleted(session: \(sessionId.prefix(8)), tool: \(toolId.prefix(12)), status: \(status))"
-        case .subagentStopped(let sessionId, let taskToolId):
-            return "subagentStopped(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)))"
-        case .agentFileUpdated(let sessionId, let taskToolId, let tools):
-            return "agentFileUpdated(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)), tools: \(tools.count))"
+        case let .hookReceived(event):
+            "hookReceived(\(event.event), session: \(event.sessionID.prefix(8)))"
+        case let .permissionApproved(sessionID, toolUseID):
+            "permissionApproved(session: \(sessionID.prefix(8)), tool: \(toolUseID.prefix(12)))"
+        case let .permissionDenied(sessionID, toolUseID, _):
+            "permissionDenied(session: \(sessionID.prefix(8)), tool: \(toolUseID.prefix(12)))"
+        case let .permissionSocketFailed(sessionID, toolUseID):
+            "permissionSocketFailed(session: \(sessionID.prefix(8)), tool: \(toolUseID.prefix(12)))"
+        case let .fileUpdated(payload):
+            "fileUpdated(session: \(payload.sessionID.prefix(8)), messages: \(payload.messages.count))"
+        case let .interruptDetected(sessionID):
+            "interruptDetected(session: \(sessionID.prefix(8)))"
+        case let .clearDetected(sessionID):
+            "clearDetected(session: \(sessionID.prefix(8)))"
+        case let .sessionEnded(sessionID):
+            "sessionEnded(session: \(sessionID.prefix(8)))"
+        case let .loadHistory(sessionID, _):
+            "loadHistory(session: \(sessionID.prefix(8)))"
+        case let .historyLoaded(payload):
+            "historyLoaded(session: \(payload.sessionID.prefix(8)), messages: \(payload.messages.count))"
+        case let .toolCompleted(sessionID, toolUseID, result):
+            "toolCompleted(session: \(sessionID.prefix(8)), tool: \(toolUseID.prefix(12)), status: \(result.status))"
+        case let .subagentStarted(sessionID, taskToolID):
+            "subagentStarted(session: \(sessionID.prefix(8)), task: \(taskToolID.prefix(12)))"
+        case let .subagentToolExecuted(sessionID, tool):
+            "subagentToolExecuted(session: \(sessionID.prefix(8)), tool: \(tool.name))"
+        case let .subagentToolCompleted(sessionID, toolID, status):
+            "subagentToolCompleted(session: \(sessionID.prefix(8)), tool: \(toolID.prefix(12)), status: \(status))"
+        case let .subagentStopped(sessionID, taskToolID):
+            "subagentStopped(session: \(sessionID.prefix(8)), task: \(taskToolID.prefix(12)))"
+        case let .agentFileUpdated(sessionID, taskToolID, tools):
+            "agentFileUpdated(session: \(sessionID.prefix(8)), task: \(taskToolID.prefix(12)), tools: \(tools.count))"
         }
     }
 }

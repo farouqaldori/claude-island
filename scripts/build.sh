@@ -1,70 +1,60 @@
 #!/bin/bash
-# Build Claude Island for release
+# Build Claude Island with ad-hoc signing
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
-ARCHIVE_PATH="$BUILD_DIR/ClaudeIsland.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 
-echo "=== Building Claude Island ==="
+# Check if local version matches latest git tag
+check_version_sync() {
+    LATEST_TAG=$(cd "$PROJECT_DIR" && git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+    if [ -n "$LATEST_TAG" ]; then
+        CURRENT_VERSION=$(cd "$PROJECT_DIR" && agvtool what-marketing-version -terse1 2>/dev/null)
+        if [ -n "$CURRENT_VERSION" ] && [ "$LATEST_TAG" != "$CURRENT_VERSION" ]; then
+            echo "⚠️  Warning: Local version ($CURRENT_VERSION) differs from latest tag ($LATEST_TAG)"
+            echo "   Run: agvtool new-marketing-version $LATEST_TAG"
+            echo ""
+        fi
+    fi
+}
+check_version_sync
+
+echo "=== Building Claude Island (Ad-Hoc Signed) ==="
 echo ""
 
 # Clean previous builds
 rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
+mkdir -p "$BUILD_DIR" "$EXPORT_PATH"
 
 cd "$PROJECT_DIR"
 
-# Build and archive
-echo "Archiving..."
-xcodebuild archive \
+# Build with ad-hoc signing
+echo "Building..."
+xcodebuild build \
     -scheme ClaudeIsland \
     -configuration Release \
-    -archivePath "$ARCHIVE_PATH" \
-    -destination "generic/platform=macOS" \
-    ENABLE_HARDENED_RUNTIME=YES \
-    CODE_SIGN_STYLE=Automatic \
-    | xcpretty || xcodebuild archive \
+    -derivedDataPath "$BUILD_DIR/DerivedData" \
+    CODE_SIGN_IDENTITY=- \
+    DEVELOPMENT_TEAM= \
+    COPY_PHASE_STRIP=YES \
+    STRIP_INSTALLED_PRODUCT=YES \
+    | xcpretty || xcodebuild build \
     -scheme ClaudeIsland \
     -configuration Release \
-    -archivePath "$ARCHIVE_PATH" \
-    -destination "generic/platform=macOS" \
-    ENABLE_HARDENED_RUNTIME=YES \
-    CODE_SIGN_STYLE=Automatic
+    -derivedDataPath "$BUILD_DIR/DerivedData" \
+    CODE_SIGN_IDENTITY=- \
+    DEVELOPMENT_TEAM= \
+    COPY_PHASE_STRIP=YES \
+    STRIP_INSTALLED_PRODUCT=YES
 
-# Create ExportOptions.plist if it doesn't exist
-EXPORT_OPTIONS="$BUILD_DIR/ExportOptions.plist"
-cat > "$EXPORT_OPTIONS" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>method</key>
-    <string>developer-id</string>
-    <key>destination</key>
-    <string>export</string>
-    <key>signingStyle</key>
-    <string>automatic</string>
-</dict>
-</plist>
-EOF
-
-# Export the archive
-echo ""
-echo "Exporting..."
-xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_PATH" \
-    -exportOptionsPlist "$EXPORT_OPTIONS" \
-    | xcpretty || xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_PATH" \
-    -exportOptionsPlist "$EXPORT_OPTIONS"
+# Copy app to expected location
+APP_OUTPUT="$BUILD_DIR/DerivedData/Build/Products/Release/Claude Island.app"
+cp -R "$APP_OUTPUT" "$EXPORT_PATH/"
 
 echo ""
 echo "=== Build Complete ==="
 echo "App exported to: $EXPORT_PATH/Claude Island.app"
 echo ""
-echo "Next: Run ./scripts/create-release.sh to notarize and create DMG"
+echo "Next: Run ./scripts/create-release.sh --skip-notarization to create DMG"

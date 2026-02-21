@@ -8,45 +8,40 @@
 import AppKit
 import SwiftUI
 
+// MARK: - SoundPickerRow
+
 struct SoundPickerRow: View {
-    @ObservedObject var soundSelector: SoundSelector
-    @State private var isHovered = false
-    @State private var selectedSound: NotificationSound = AppSettings.notificationSound
+    // MARK: Internal
 
-    private var isExpanded: Bool {
-        soundSelector.isPickerExpanded
-    }
-
-    private func setExpanded(_ value: Bool) {
-        soundSelector.isPickerExpanded = value
-    }
+    /// SoundSelector is @Observable, so SwiftUI automatically tracks property access
+    var soundSelector: SoundSelector
 
     var body: some View {
         VStack(spacing: 0) {
             // Main row - shows current selection
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    setExpanded(!isExpanded)
+                    self.setExpanded(!self.isExpanded)
                 }
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "speaker.wave.2")
                         .font(.system(size: 12))
-                        .foregroundColor(textColor)
+                        .foregroundColor(self.textColor)
                         .frame(width: 16)
 
                     Text("Notification Sound")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(textColor)
+                        .foregroundColor(self.textColor)
 
                     Spacer()
 
-                    Text(selectedSound.rawValue)
+                    Text(self.selectedSound.rawValue)
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                         .lineLimit(1)
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: self.isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.4))
                 }
@@ -54,26 +49,26 @@ struct SoundPickerRow: View {
                 .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+                        .fill(self.isHovered ? Color.white.opacity(0.08) : Color.clear),
                 )
             }
             .buttonStyle(.plain)
-            .onHover { isHovered = $0 }
+            .onHover { self.isHovered = $0 }
 
             // Expanded sound list
-            if isExpanded {
+            if self.isExpanded {
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(NotificationSound.allCases, id: \.self) { sound in
                             SoundOptionRowInline(
                                 sound: sound,
-                                isSelected: selectedSound == sound
+                                isSelected: self.selectedSound == sound,
                             ) {
                                 // Play preview sound
                                 if let soundName = sound.soundName {
                                     NSSound(named: soundName)?.play()
                                 }
-                                selectedSound = sound
+                                self.selectedSound = sound
                                 AppSettings.notificationSound = sound
                             }
                         }
@@ -85,38 +80,51 @@ struct SoundPickerRow: View {
             }
         }
         .onAppear {
-            selectedSound = AppSettings.notificationSound
+            self.selectedSound = AppSettings.notificationSound
         }
     }
 
+    // MARK: Private
+
+    @State private var isHovered = false
+    @State private var selectedSound: NotificationSound = AppSettings.notificationSound
+
+    private var isExpanded: Bool {
+        self.soundSelector.isPickerExpanded
+    }
+
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        .white.opacity(self.isHovered ? 1.0 : 0.7)
+    }
+
+    private func setExpanded(_ value: Bool) {
+        self.soundSelector.isPickerExpanded = value
     }
 }
 
-// MARK: - Sound Option Row (Inline version)
+// MARK: - SoundOptionRowInline
 
 private struct SoundOptionRowInline: View {
+    // MARK: Internal
+
     let sound: NotificationSound
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button(action: action) {
+        Button(action: self.action) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(isSelected ? TerminalColors.green : Color.white.opacity(0.2))
+                    .fill(self.isSelected ? TerminalColors.green : Color.white.opacity(0.2))
                     .frame(width: 6, height: 6)
 
-                Text(sound.rawValue)
+                Text(self.sound.rawValue)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(isHovered ? 1.0 : 0.7))
+                    .foregroundColor(.white.opacity(self.isHovered ? 1.0 : 0.7))
 
                 Spacer()
 
-                if isSelected {
+                if self.isSelected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(TerminalColors.green)
@@ -126,10 +134,14 @@ private struct SoundOptionRowInline: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
+                    .fill(self.isHovered ? Color.white.opacity(0.06) : Color.clear),
             )
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .onHover { self.isHovered = $0 }
     }
+
+    // MARK: Private
+
+    @State private var isHovered = false
 }

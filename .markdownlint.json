@@ -1,0 +1,40 @@
+{
+  "default": true,
+  "MD003": {
+    "style": "atx"
+  },
+  "MD004": {
+    "style": "dash"
+  },
+  "MD007": {
+    "indent": 2
+  },
+  "MD009": {
+    "br_spaces": 2
+  },
+  "MD012": {
+    "maximum": 2
+  },
+  "MD013": false,
+  "MD024": {
+    "siblings_only": true
+  },
+  "MD025": {
+    "front_matter_title": ""
+  },
+  "MD029": {
+    "style": "ordered"
+  },
+  "MD033": {
+    "allowed_elements": ["details", "summary", "kbd", "br", "sup", "sub", "img", "a", "div", "h1", "h2", "h3", "h4", "p", "span", "picture", "source"]
+  },
+  "MD035": {
+    "style": "---"
+  },
+  "MD040": false,
+  "MD041": false,
+  "MD046": false,
+  "MD048": {
+    "style": "backtick"
+  }
+}

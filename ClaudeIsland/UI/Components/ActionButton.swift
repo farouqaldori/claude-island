@@ -8,34 +8,38 @@
 import SwiftUI
 
 struct ActionButton: View {
+    // MARK: Internal
+
     let title: String
     let icon: String
     let color: Color
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button(action: action) {
+        Button(action: self.action) {
             HStack(spacing: 5) {
-                Image(systemName: icon)
+                Image(systemName: self.icon)
                     .font(.system(size: 9, weight: .bold))
-                Text(title)
+                Text(self.title)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
             }
-            .foregroundColor(isHovered ? .black : color)
+            .foregroundColor(self.isHovered ? .black : self.color)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovered ? color : color.opacity(0.15))
+                    .fill(self.isHovered ? self.color : self.color.opacity(0.15)),
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(color.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(self.color.opacity(0.3), lineWidth: 1),
             )
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .onHover { self.isHovered = $0 }
     }
+
+    // MARK: Private
+
+    @State private var isHovered = false
 }

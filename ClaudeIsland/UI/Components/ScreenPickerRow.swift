@@ -7,44 +7,40 @@
 
 import SwiftUI
 
+// MARK: - ScreenPickerRow
+
 struct ScreenPickerRow: View {
-    @ObservedObject var screenSelector: ScreenSelector
-    @State private var isHovered = false
+    // MARK: Internal
 
-    private var isExpanded: Bool {
-        get { screenSelector.isPickerExpanded }
-    }
-
-    private func setExpanded(_ value: Bool) {
-        screenSelector.isPickerExpanded = value
-    }
+    /// ScreenSelector is @Observable, so SwiftUI automatically tracks property access
+    var screenSelector: ScreenSelector
 
     var body: some View {
         VStack(spacing: 0) {
             // Main row - shows current selection
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    setExpanded(!isExpanded)
+                    self.setExpanded(!self.isExpanded)
                 }
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "display")
                         .font(.system(size: 12))
-                        .foregroundColor(textColor)
+                        .foregroundColor(self.textColor)
                         .frame(width: 16)
 
                     Text("Screen")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(textColor)
+                        .foregroundColor(self.textColor)
 
                     Spacer()
 
-                    Text(currentSelectionLabel)
+                    Text(self.currentSelectionLabel)
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                         .lineLimit(1)
 
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: self.isExpanded ? "chevron.up" : "chevron.down")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.4))
                 }
@@ -52,37 +48,37 @@ struct ScreenPickerRow: View {
                 .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+                        .fill(self.isHovered ? Color.white.opacity(0.08) : Color.clear),
                 )
             }
             .buttonStyle(.plain)
-            .onHover { isHovered = $0 }
+            .onHover { self.isHovered = $0 }
 
             // Expanded screen list
-            if isExpanded {
+            if self.isExpanded {
                 VStack(spacing: 2) {
                     // Automatic option
                     ScreenOptionRow(
                         label: "Automatic",
                         sublabel: "Built-in or Main",
-                        isSelected: screenSelector.selectionMode == .automatic
+                        isSelected: self.screenSelector.selectionMode == .automatic,
                     ) {
-                        screenSelector.selectAutomatic()
-                        triggerWindowRecreation()
-                        collapseAfterDelay()
+                        self.screenSelector.selectAutomatic()
+                        self.triggerWindowRecreation()
+                        self.collapseAfterDelay()
                     }
 
                     // Individual screens
-                    ForEach(screenSelector.availableScreens, id: \.self) { screen in
+                    ForEach(self.screenSelector.availableScreens, id: \.self) { screen in
                         ScreenOptionRow(
                             label: screen.localizedName,
-                            sublabel: screenSublabel(for: screen),
-                            isSelected: screenSelector.selectionMode == .specificScreen &&
-                                       screenSelector.isSelected(screen)
+                            sublabel: self.screenSublabel(for: screen),
+                            isSelected: self.screenSelector.selectionMode == .specificScreen &&
+                                self.screenSelector.isSelected(screen),
                         ) {
-                            screenSelector.selectScreen(screen)
-                            triggerWindowRecreation()
-                            collapseAfterDelay()
+                            self.screenSelector.selectScreen(screen)
+                            self.triggerWindowRecreation()
+                            self.collapseAfterDelay()
                         }
                     }
                 }
@@ -92,8 +88,17 @@ struct ScreenPickerRow: View {
         }
     }
 
+    // MARK: Private
+
+    @State private var isHovered = false
+    @State private var collapseTask: Task<Void, Never>?
+
+    private var isExpanded: Bool {
+        self.screenSelector.isPickerExpanded
+    }
+
     private var currentSelectionLabel: String {
-        switch screenSelector.selectionMode {
+        switch self.screenSelector.selectionMode {
         case .automatic:
             return "Auto"
         case .specificScreen:
@@ -105,7 +110,11 @@ struct ScreenPickerRow: View {
     }
 
     private var textColor: Color {
-        .white.opacity(isHovered ? 1.0 : 0.7)
+        .white.opacity(self.isHovered ? 1.0 : 0.7)
+    }
+
+    private func setExpanded(_ value: Bool) {
+        self.screenSelector.isPickerExpanded = value
     }
 
     private func screenSublabel(for screen: NSScreen) -> String? {
@@ -123,42 +132,45 @@ struct ScreenPickerRow: View {
         // Notify to recreate the window
         NotificationCenter.default.post(
             name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
+            object: nil,
         )
     }
 
     private func collapseAfterDelay() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        self.collapseTask?.cancel()
+        self.collapseTask = Task(name: "collapse-color-picker") {
+            try? await Task.sleep(for: .seconds(0.3))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.2)) {
-                setExpanded(false)
+                self.setExpanded(false)
             }
         }
     }
 }
 
-// MARK: - Screen Option Row
+// MARK: - ScreenOptionRow
 
 private struct ScreenOptionRow: View {
+    // MARK: Internal
+
     let label: String
     let sublabel: String?
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button(action: action) {
+        Button(action: self.action) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(isSelected ? TerminalColors.green : Color.white.opacity(0.2))
+                    .fill(self.isSelected ? TerminalColors.green : Color.white.opacity(0.2))
                     .frame(width: 6, height: 6)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(label)
+                    Text(self.label)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(isHovered ? 1.0 : 0.7))
+                        .foregroundColor(.white.opacity(self.isHovered ? 1.0 : 0.7))
 
-                    if let sublabel = sublabel {
+                    if let sublabel {
                         Text(sublabel)
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.4))
@@ -167,7 +179,7 @@ private struct ScreenOptionRow: View {
 
                 Spacer()
 
-                if isSelected {
+                if self.isSelected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(TerminalColors.green)
@@ -177,10 +189,14 @@ private struct ScreenOptionRow: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
+                    .fill(self.isHovered ? Color.white.opacity(0.06) : Color.clear),
             )
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .onHover { self.isHovered = $0 }
     }
+
+    // MARK: Private
+
+    @State private var isHovered = false
 }

@@ -9,127 +9,26 @@ import AppKit
 import CoreGraphics
 import SwiftUI
 
-// Corner radius constants
+/// Corner radius constants
 private let cornerRadiusInsets = (
     opened: (top: CGFloat(19), bottom: CGFloat(24)),
-    closed: (top: CGFloat(6), bottom: CGFloat(14))
+    closed: (top: CGFloat(6), bottom: CGFloat(14)),
 )
 
+// MARK: - NotchView
+
+// swiftlint:disable:next type_body_length
 struct NotchView: View {
-    @ObservedObject var viewModel: NotchViewModel
-    @StateObject private var sessionMonitor = ClaudeSessionMonitor()
-    @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
-    @ObservedObject private var updateManager = UpdateManager.shared
-    @State private var previousPendingIds: Set<String> = []
-    @State private var previousWaitingForInputIds: Set<String> = []
-    @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
-    @State private var isVisible: Bool = false
-    @State private var isHovering: Bool = false
-    @State private var isBouncing: Bool = false
+    // MARK: Lifecycle
 
-    @Namespace private var activityNamespace
-
-    /// Whether any Claude session is currently processing or compacting
-    private var isAnyProcessing: Bool {
-        sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
+    init(viewModel: NotchViewModel) {
+        self.viewModel = viewModel
     }
 
-    /// Whether any Claude session has a pending permission request
-    private var hasPendingPermission: Bool {
-        sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
-    }
+    // MARK: Internal
 
-    /// Whether any Claude session is waiting for user input (done/ready state) within the display window
-    private var hasWaitingForInput: Bool {
-        let now = Date()
-        let displayDuration: TimeInterval = 30  // Show checkmark for 30 seconds
-
-        return sessionMonitor.instances.contains { session in
-            guard session.phase == .waitingForInput else { return false }
-            // Only show if within the 30-second display window
-            if let enteredAt = waitingForInputTimestamps[session.stableId] {
-                return now.timeIntervalSince(enteredAt) < displayDuration
-            }
-            return false
-        }
-    }
-
-    // MARK: - Sizing
-
-    private var closedNotchSize: CGSize {
-        CGSize(
-            width: viewModel.deviceNotchRect.width,
-            height: viewModel.deviceNotchRect.height
-        )
-    }
-
-    /// Extra width for expanding activities (like Dynamic Island)
-    private var expansionWidth: CGFloat {
-        // Permission indicator adds width on left side only
-        let permissionIndicatorWidth: CGFloat = hasPendingPermission ? 18 : 0
-
-        // Expand for processing activity
-        if activityCoordinator.expandingActivity.show {
-            switch activityCoordinator.expandingActivity.type {
-            case .claude:
-                let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
-                return baseWidth + permissionIndicatorWidth
-            case .none:
-                break
-            }
-        }
-
-        // Expand for pending permissions (left indicator) or waiting for input (checkmark on right)
-        if hasPendingPermission {
-            return 2 * max(0, closedNotchSize.height - 12) + 20 + permissionIndicatorWidth
-        }
-
-        // Waiting for input just shows checkmark on right, no extra left indicator
-        if hasWaitingForInput {
-            return 2 * max(0, closedNotchSize.height - 12) + 20
-        }
-
-        return 0
-    }
-
-    private var notchSize: CGSize {
-        switch viewModel.status {
-        case .closed, .popping:
-            return closedNotchSize
-        case .opened:
-            return viewModel.openedSize
-        }
-    }
-
-    /// Width of the closed content (notch + any expansion)
-    private var closedContentWidth: CGFloat {
-        closedNotchSize.width + expansionWidth
-    }
-
-    // MARK: - Corner Radii
-
-    private var topCornerRadius: CGFloat {
-        viewModel.status == .opened
-            ? cornerRadiusInsets.opened.top
-            : cornerRadiusInsets.closed.top
-    }
-
-    private var bottomCornerRadius: CGFloat {
-        viewModel.status == .opened
-            ? cornerRadiusInsets.opened.bottom
-            : cornerRadiusInsets.closed.bottom
-    }
-
-    private var currentNotchShape: NotchShape {
-        NotchShape(
-            topCornerRadius: topCornerRadius,
-            bottomCornerRadius: bottomCornerRadius
-        )
-    }
-
-    // Animation springs
-    private let openAnimation = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
-    private let closeAnimation = Animation.spring(response: 0.45, dampingFraction: 1.0, blendDuration: 0)
+    /// View model is @Observable, so SwiftUI automatically tracks property access
+    var viewModel: NotchViewModel
 
     // MARK: - Body
 
@@ -137,105 +36,377 @@ struct NotchView: View {
         ZStack(alignment: .top) {
             // Outer container does NOT receive hits - only the notch content does
             VStack(spacing: 0) {
-                notchLayout
+                self.notchLayout
                     .frame(
-                        maxWidth: viewModel.status == .opened ? notchSize.width : nil,
-                        alignment: .top
+                        maxWidth: self.viewModel.status == .opened
+                            ? self.notchSize.width
+                            : (self.showClosedActivity ? self.closedContentWidth : nil),
+                        alignment: .top,
                     )
                     .padding(
                         .horizontal,
-                        viewModel.status == .opened
+                        self.viewModel.status == .opened
                             ? cornerRadiusInsets.opened.top
-                            : cornerRadiusInsets.closed.bottom
+                            : cornerRadiusInsets.closed.bottom,
                     )
-                    .padding([.horizontal, .bottom], viewModel.status == .opened ? 12 : 0)
+                    .padding([.horizontal, .bottom], self.viewModel.status == .opened ? 12 : 0)
                     .background(.black)
-                    .clipShape(currentNotchShape)
+                    .clipShape(self.currentNotchShape)
                     .overlay(alignment: .top) {
                         Rectangle()
                             .fill(.black)
                             .frame(height: 1)
-                            .padding(.horizontal, topCornerRadius)
+                            .padding(.horizontal, self.topCornerRadius)
                     }
                     .shadow(
-                        color: (viewModel.status == .opened || isHovering) ? .black.opacity(0.7) : .clear,
-                        radius: 6
+                        color: (self.viewModel.status == .opened || self.isHovering) ? .black.opacity(0.7) : .clear,
+                        radius: 6,
                     )
                     .frame(
-                        maxWidth: viewModel.status == .opened ? notchSize.width : nil,
-                        maxHeight: viewModel.status == .opened ? notchSize.height : nil,
-                        alignment: .top
+                        maxWidth: self.viewModel.status == .opened
+                            ? self.notchSize.width
+                            : (self.showClosedActivity ? self.closedContentWidth : nil),
+                        maxHeight: self.viewModel.status == .opened ? self.notchSize.height : nil,
+                        alignment: .top,
                     )
-                    .animation(viewModel.status == .opened ? openAnimation : closeAnimation, value: viewModel.status)
-                    .animation(openAnimation, value: notchSize) // Animate container size changes between content types
-                    .animation(.smooth, value: activityCoordinator.expandingActivity)
-                    .animation(.smooth, value: hasPendingPermission)
-                    .animation(.smooth, value: hasWaitingForInput)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isBouncing)
+                    .animation(self.viewModel.status == .opened ? self.openAnimation : self.closeAnimation, value: self.viewModel.status)
+                    .animation(self.openAnimation, value: self.notchSize) // Animate container size changes between content types
+                    .animation(.smooth, value: self.activityCoordinator.expandingActivity)
+                    .animation(.smooth, value: self.hasPendingPermission)
+                    .animation(.smooth, value: self.hasWaitingForInput)
+                    .animation(.smooth, value: self.accessibilityManager.shouldShowPermissionWarning)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.5), value: self.isBouncing)
+                    .animation(.smooth, value: self.clawdAlwaysVisible)
                     .contentShape(Rectangle())
                     .onHover { hovering in
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
-                            isHovering = hovering
+                            self.isHovering = hovering
                         }
                     }
                     .onTapGesture {
-                        if viewModel.status != .opened {
-                            viewModel.notchOpen(reason: .click)
+                        if self.viewModel.status != .opened {
+                            self.viewModel.notchOpen(reason: .click)
                         }
                     }
             }
         }
-        .opacity(isVisible ? 1 : 0)
+        .opacity(self.isVisible ? 1 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
         .onAppear {
-            sessionMonitor.startMonitoring()
+            self.sessionMonitor.startMonitoring()
             // On non-notched devices, keep visible so users have a target to interact with
-            if !viewModel.hasPhysicalNotch {
-                isVisible = true
+            // Also keep visible if accessibility permission is missing (show warning)
+            // Also keep visible if Clawd always visible is enabled
+            if !self.viewModel.hasPhysicalNotch || self.needsAccessibilityWarning || self.clawdAlwaysVisible {
+                self.isVisible = true
             }
         }
-        .onChange(of: viewModel.status) { oldStatus, newStatus in
-            handleStatusChange(from: oldStatus, to: newStatus)
+        .onChange(of: self.viewModel.status) { oldStatus, newStatus in
+            self.handleStatusChange(from: oldStatus, to: newStatus)
         }
-        .onChange(of: sessionMonitor.pendingInstances) { _, sessions in
-            handlePendingSessionsChange(sessions)
+        .onChange(of: self.sessionMonitor.pendingInstances) { _, sessions in
+            self.handlePendingSessionsChange(sessions)
         }
-        .onChange(of: sessionMonitor.instances) { _, instances in
-            handleProcessingChange()
-            handleWaitingForInputChange(instances)
+        .onChange(of: self.sessionMonitor.instances) { _, instances in
+            self.handleProcessingChange()
+            self.handleWaitingForInputChange(instances)
         }
+        .onChange(of: self.accessibilityManager.shouldShowPermissionWarning) { _, shouldShow in
+            // Keep notch visible while accessibility warning is shown
+            if shouldShow {
+                self.isVisible = true
+                self.hideVisibilityTask?.cancel()
+            } else {
+                // Warning dismissed, trigger normal visibility logic
+                self.handleProcessingChange()
+            }
+        }
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: NSApplication.didBecomeActiveNotification) {
+                // Check accessibility permission when app becomes active
+                // Catches the case where user grants permission in System Settings
+                self.accessibilityManager.handleAppActivation()
+            }
+        }
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: UserDefaults.didChangeNotification) {
+                self.clawdColor = AppSettings.clawdColor
+                self.clawdAlwaysVisible = AppSettings.clawdAlwaysVisible
+            }
+        }
+        .onChange(of: self.clawdAlwaysVisible) { _, newValue in
+            if newValue {
+                self.isVisible = true
+                self.hideVisibilityTask?.cancel()
+            } else {
+                self.handleProcessingChange()
+            }
+        }
+    }
+
+    // MARK: Private
+
+    /// Session monitor is @Observable, so we use @State for ownership
+    @State private var sessionMonitor = ClaudeSessionMonitor()
+    @State private var previousPendingIDs: Set<String> = []
+    @State private var previousWaitingForInputIDs: Set<String> = []
+    @State private var waitingForInputTimestamps: [String: Date] = [:] // sessionID -> when it entered waitingForInput
+    @State private var isVisible = false
+    @State private var isHovering = false
+    @State private var isBouncing = false
+    @State private var hideVisibilityTask: Task<Void, Never>?
+    @State private var bounceTask: Task<Void, Never>?
+    @State private var checkmarkHideTask: Task<Void, Never>?
+    @State private var clawdColor: Color = AppSettings.clawdColor
+    @State private var clawdAlwaysVisible: Bool = AppSettings.clawdAlwaysVisible
+    @Namespace private var activityNamespace
+
+    private var updateManager = UpdateManager.shared
+
+    /// Singleton is @Observable, so SwiftUI automatically tracks property access
+    private var activityCoordinator = NotchActivityCoordinator.shared
+
+    /// Singleton for accessibility permission state
+    private var accessibilityManager = AccessibilityPermissionManager.shared
+
+    /// Singleton for token tracking state
+    private var tokenTrackingManager = TokenTrackingManager.shared
+
+    // Animation springs
+    private let openAnimation = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
+    private let closeAnimation = Animation.spring(response: 0.45, dampingFraction: 1.0, blendDuration: 0)
+
+    /// Prefix indicating context was resumed (not a true "done" state)
+    private let contextResumePrefix = "This session is being continued from a previous conversation"
+
+    /// Whether any Claude session is currently processing or compacting
+    private var isAnyProcessing: Bool {
+        self.sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
+    }
+
+    /// Whether any Claude session has a pending permission request
+    private var hasPendingPermission: Bool {
+        self.sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
+    }
+
+    /// Whether any Claude session is waiting for user input (done/ready state) within the display window
+    private var hasWaitingForInput: Bool {
+        let now = Date()
+        let displayDuration: TimeInterval = 30 // Show checkmark for 30 seconds
+
+        return self.sessionMonitor.instances.contains { session in
+            guard session.phase == .waitingForInput else { return false }
+            // Only show if within the 30-second display window
+            if let enteredAt = waitingForInputTimestamps[session.stableID] {
+                return now.timeIntervalSince(enteredAt) < displayDuration
+            }
+            return false
+        }
+    }
+
+    /// Sessions that are active (not ended) - includes idle sessions as they
+    /// still represent running Claude processes
+    private var activeSessions: [SessionState] {
+        self.sessionMonitor.instances.filter { $0.phase != .ended }
+    }
+
+    /// Whether we have multiple active sessions to show dots for
+    private var hasMultipleActiveSessions: Bool {
+        self.activeSessions.count > 1
+    }
+
+    /// Whether accessibility permission is missing (show warning icon)
+    private var needsAccessibilityWarning: Bool {
+        self.accessibilityManager.shouldShowPermissionWarning
+    }
+
+    // MARK: - Sizing
+
+    private var closedNotchSize: CGSize {
+        CGSize(
+            width: self.viewModel.deviceNotchRect.width,
+            height: self.viewModel.deviceNotchRect.height,
+        )
+    }
+
+    /// Extra width for expanding activities (like Dynamic Island)
+    private var expansionWidth: CGFloat {
+        // Permission indicator adds width on left side only
+        let permissionIndicatorWidth: CGFloat = self.hasPendingPermission ? 18 : 0
+
+        // Accessibility warning indicator width
+        let accessibilityWarningWidth: CGFloat = self.needsAccessibilityWarning ? 18 : 0
+
+        // Token rings width (calculated separately to avoid recursion)
+        let tokenRingsExtraWidth: CGFloat = {
+            guard AppSettings.tokenTrackingMode != .disabled && AppSettings.tokenShowRingsMinimized else { return 0 }
+            let display = AppSettings.tokenMinimizedRingDisplay
+            let ringCount = (display.showSession ? 1 : 0) + (display.showWeekly ? 1 : 0)
+            guard ringCount > 0 else { return 0 }
+            let ringSize: CGFloat = 16
+            return CGFloat(ringCount) * ringSize + CGFloat(ringCount - 1) * 4 + 12
+        }()
+
+        // Horizontal padding that needs to be outside the notch area
+        let horizontalPadding = 2 * cornerRadiusInsets.closed.bottom
+
+        // Expand for processing activity
+        if self.activityCoordinator.expandingActivity.show {
+            switch self.activityCoordinator.expandingActivity.type {
+            case .claude:
+                let baseWidth = 2 * max(0, self.closedNotchSize.height - 12) + 20
+                return baseWidth + permissionIndicatorWidth + accessibilityWarningWidth + tokenRingsExtraWidth + horizontalPadding
+            case .none:
+                break
+            }
+        }
+
+        // Expand for pending permissions (left indicator) or waiting for input (checkmark on right)
+        if self.hasPendingPermission {
+            return 2 * max(0, self.closedNotchSize.height - 12) + 20 + permissionIndicatorWidth + accessibilityWarningWidth + tokenRingsExtraWidth +
+                horizontalPadding
+        }
+
+        // Waiting for input just shows checkmark on right, no extra left indicator
+        if self.hasWaitingForInput {
+            return 2 * max(0, self.closedNotchSize.height - 12) + 20 + accessibilityWarningWidth + tokenRingsExtraWidth + horizontalPadding
+        }
+
+        // Expand for multiple active sessions to accommodate session state dots
+        // Uses symmetric expansion (sideWidth on both left and right) like processing
+        if self.hasMultipleActiveSessions {
+            return 2 * max(0, self.closedNotchSize.height - 12) + 20 + accessibilityWarningWidth + tokenRingsExtraWidth + horizontalPadding
+        }
+
+        // Expand just for accessibility warning (when no other activity)
+        if self.needsAccessibilityWarning {
+            return 2 * max(0, self.closedNotchSize.height - 12) + 20 + accessibilityWarningWidth + tokenRingsExtraWidth + horizontalPadding
+        }
+
+        // Expand for Clawd always visible (when no other activity)
+        if self.clawdAlwaysVisible {
+            return 2 * max(0, self.closedNotchSize.height - 12) + 20 + tokenRingsExtraWidth + horizontalPadding
+        }
+
+        // Expand just for token rings (when no other activity)
+        if tokenRingsExtraWidth > 0 {
+            return 2 * max(0, self.closedNotchSize.height - 12) + 20 + tokenRingsExtraWidth + horizontalPadding
+        }
+
+        return 0
+    }
+
+    private var notchSize: CGSize {
+        switch self.viewModel.status {
+        case .closed,
+             .popping:
+            self.closedNotchSize
+        case .opened:
+            self.viewModel.openedSize
+        }
+    }
+
+    /// Width of the closed content (notch + any expansion)
+    private var closedContentWidth: CGFloat {
+        self.closedNotchSize.width + self.expansionWidth
+    }
+
+    // MARK: - Corner Radii
+
+    private var topCornerRadius: CGFloat {
+        self.viewModel.status == .opened
+            ? cornerRadiusInsets.opened.top
+            : cornerRadiusInsets.closed.top
+    }
+
+    private var bottomCornerRadius: CGFloat {
+        self.viewModel.status == .opened
+            ? cornerRadiusInsets.opened.bottom
+            : cornerRadiusInsets.closed.bottom
+    }
+
+    private var currentNotchShape: NotchShape {
+        NotchShape(
+            topCornerRadius: self.topCornerRadius,
+            bottomCornerRadius: self.bottomCornerRadius,
+        )
     }
 
     // MARK: - Notch Layout
 
     private var isProcessing: Bool {
-        activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
+        self.activityCoordinator.expandingActivity.show && self.activityCoordinator.expandingActivity.type == .claude
     }
 
-    /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
+    /// Whether to show the expanded closed state (processing, pending permission, waiting for input, accessibility warning, always visible, or token
+    /// rings)
     private var showClosedActivity: Bool {
-        isProcessing || hasPendingPermission || hasWaitingForInput
+        self.isProcessing || self.hasPendingPermission || self.hasWaitingForInput
+            || self.hasMultipleActiveSessions || self.needsAccessibilityWarning || self.clawdAlwaysVisible
+            || self.shouldShowTokenRingsMinimized
     }
 
-    @ViewBuilder
+    private var sideWidth: CGFloat {
+        max(0, self.closedNotchSize.height - 12) + 10
+    }
+
+    private var shouldShowTokenRingsMinimized: Bool {
+        AppSettings.tokenTrackingMode != .disabled && AppSettings.tokenShowRingsMinimized
+    }
+
+    private var shouldShowTokenRingsExpanded: Bool {
+        AppSettings.tokenTrackingMode != .disabled
+    }
+
+    private var tokenRingsWidth: CGFloat {
+        guard self.shouldShowTokenRingsMinimized else { return 0 }
+        let display = AppSettings.tokenMinimizedRingDisplay
+        let ringCount = (display.showSession ? 1 : 0) + (display.showWeekly ? 1 : 0)
+        guard ringCount > 0 else { return 0 }
+        let ringSize: CGFloat = 16
+        return CGFloat(ringCount) * ringSize + CGFloat(ringCount - 1) * 4
+    }
+
+    private var rightSideWidth: CGFloat {
+        var width = self.sideWidth
+        if self.shouldShowTokenRingsMinimized {
+            width += self.tokenRingsWidth + 8
+        }
+        return width
+    }
+
+    @ViewBuilder private var minimizedTokenRings: some View {
+        let display = AppSettings.tokenMinimizedRingDisplay
+        TokenRingsOverlay(
+            sessionPercentage: self.tokenTrackingManager.sessionPercentage,
+            weeklyPercentage: self.tokenTrackingManager.weeklyPercentage,
+            showSession: display.showSession,
+            showWeekly: display.showWeekly,
+            size: 16,
+            strokeWidth: 2,
+            showResetTime: AppSettings.tokenShowResetTime,
+            sessionResetTime: self.tokenTrackingManager.sessionResetTime,
+        )
+    }
+
     private var notchLayout: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row - always present, contains crab and spinner that persist across states
-            headerRow
-                .frame(height: max(24, closedNotchSize.height))
+            self.headerRow
+                .frame(height: max(24, self.closedNotchSize.height))
 
             // Main content only when opened
-            if viewModel.status == .opened {
-                contentView
-                    .frame(width: notchSize.width - 24) // Fixed width to prevent reflow
+            if self.viewModel.status == .opened {
+                self.contentView
+                    .frame(width: self.notchSize.width - 24) // Fixed width to prevent reflow
                     .transition(
                         .asymmetric(
                             insertion: .scale(scale: 0.8, anchor: .top)
                                 .combined(with: .opacity)
                                 .animation(.smooth(duration: 0.35)),
-                            removal: .opacity.animation(.easeOut(duration: 0.15))
-                        )
+                            removal: .opacity.animation(.easeOut(duration: 0.15)),
+                        ),
                     )
             }
         }
@@ -243,153 +414,206 @@ struct NotchView: View {
 
     // MARK: - Header Row (persists across states)
 
-    @ViewBuilder
     private var headerRow: some View {
         HStack(spacing: 0) {
-            // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
-            if showClosedActivity {
+            // Left side - crab + optional indicators (only when minimized - when opened, crab moves to openedHeaderContent)
+            if self.showClosedActivity && self.viewModel.status != .opened {
                 HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
-                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+                    ClaudeCrabIcon(size: 14, color: self.clawdColor, animateLegs: self.isProcessing)
+                        .matchedGeometryEffect(id: "crab", in: self.activityNamespace, isSource: self.viewModel.status != .opened)
 
-                    // Permission indicator only (amber) - waiting for input shows checkmark on right
-                    if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
-                            .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+                    // Permission indicator (prompt) - waiting for input shows checkmark on right
+                    if self.hasPendingPermission {
+                        PermissionIndicatorIcon(size: 14, color: self.clawdColor)
+                            .matchedGeometryEffect(id: "status-indicator", in: self.activityNamespace, isSource: true)
+                    }
+
+                    // Accessibility warning indicator (amber) - tap to re-check permission
+                    if self.needsAccessibilityWarning {
+                        Button {
+                            self.accessibilityManager.handleAppActivation()
+                        } label: {
+                            AccessibilityWarningIcon(size: 14, color: TerminalColors.amber)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
-                .padding(.leading, viewModel.status == .opened ? 8 : 0)
+                .frame(width: self.sideWidth + (self.hasPendingPermission ? 18 : 0) + (self.needsAccessibilityWarning ? 18 : 0))
             }
 
             // Center content
-            if viewModel.status == .opened {
+            if self.viewModel.status == .opened {
                 // Opened: show header content
-                openedHeaderContent
-            } else if !showClosedActivity {
+                self.openedHeaderContent
+            } else if !self.showClosedActivity {
                 // Closed without activity: empty space
                 Rectangle()
                     .fill(.clear)
-                    .frame(width: closedNotchSize.width - 20)
+                    .frame(width: self.closedNotchSize.width - 20)
             } else {
-                // Closed with activity: black spacer (with optional bounce)
-                Rectangle()
-                    .fill(.black)
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
-            }
-
-            // Right side - spinner when processing/pending, checkmark when waiting for input
-            if showClosedActivity {
-                if isProcessing || hasPendingPermission {
-                    ProcessingSpinner()
-                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
-                } else if hasWaitingForInput {
-                    // Checkmark for waiting-for-input on the right side
-                    ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
-                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                // Closed with activity: flexible spacer with session dots (with optional bounce)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 20)
+                        .frame(maxWidth: .infinity)
+                        .padding(.trailing, self.isBouncing ? 16 : 0)
+                    // Session state dots (only when closed with multiple active sessions)
+                    if self.hasMultipleActiveSessions {
+                        SessionStateDots(sessions: self.activeSessions)
+                            .padding(.leading, 6)
+                    }
                 }
             }
-        }
-        .frame(height: closedNotchSize.height)
-    }
 
-    private var sideWidth: CGFloat {
-        max(0, closedNotchSize.height - 12) + 10
+            // Right side - spinner when processing/pending, checkmark when waiting for input,
+            // token rings when enabled (only when minimized - when opened these move to openedHeaderContent)
+            if self.showClosedActivity && self.viewModel.status != .opened {
+                HStack(spacing: 4) {
+                    if self.isProcessing || self.hasPendingPermission {
+                        ProcessingSpinner()
+                            .matchedGeometryEffect(id: "spinner", in: self.activityNamespace, isSource: true)
+                    } else if self.hasWaitingForInput {
+                        ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
+                            .matchedGeometryEffect(id: "spinner", in: self.activityNamespace, isSource: true)
+                    }
+
+                    // Token rings when minimized and enabled
+                    if self.shouldShowTokenRingsMinimized {
+                        self.minimizedTokenRings
+                            .matchedGeometryEffect(id: "token-rings", in: self.activityNamespace, isSource: self.viewModel.status != .opened)
+                    }
+                }
+                .frame(width: self.rightSideWidth, alignment: .trailing)
+                .padding(.trailing, 4)
+            } else if self.viewModel.status != .opened && self.shouldShowTokenRingsMinimized {
+                // Token rings even when no other activity is shown
+                self.minimizedTokenRings
+                    .matchedGeometryEffect(id: "token-rings", in: self.activityNamespace, isSource: true)
+                    .padding(.trailing, 4)
+            }
+        }
+        .frame(
+            width: self.viewModel.status == .opened ? self.notchSize.width - 24 : nil,
+            height: self.closedNotchSize.height,
+        )
     }
 
     // MARK: - Opened Header Content
 
-    @ViewBuilder
     private var openedHeaderContent: some View {
-        HStack(spacing: 12) {
-            // Show static crab only if not showing activity in headerRow
-            // (headerRow handles crab + indicator when showClosedActivity is true)
-            if !showClosedActivity {
-                ClaudeCrabIcon(size: 14)
-                    .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
-                    .padding(.leading, 8)
-            }
+        HStack(spacing: 0) {
+            // Always show crab in opened state - animates from headerRow via matchedGeometryEffect
+            ClaudeCrabIcon(size: 14, color: self.clawdColor, animateLegs: self.isProcessing)
+                .matchedGeometryEffect(id: "crab", in: self.activityNamespace, isSource: self.viewModel.status == .opened)
+                .padding(.leading, 8)
 
             Spacer()
 
-            // Menu toggle
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    viewModel.toggleMenu()
-                    if viewModel.contentType == .menu {
-                        updateManager.markUpdateSeen()
-                    }
+            // Right-side elements grouped together
+            HStack(spacing: 12) {
+                // Activity indicator
+                if self.isProcessing || self.hasPendingPermission {
+                    ProcessingSpinner()
+                        .matchedGeometryEffect(id: "spinner", in: self.activityNamespace, isSource: self.viewModel.status == .opened)
+                } else if self.hasWaitingForInput {
+                    ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
+                        .matchedGeometryEffect(id: "spinner", in: self.activityNamespace, isSource: self.viewModel.status == .opened)
                 }
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: viewModel.contentType == .menu ? "xmark" : "line.3.horizontal")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.4))
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
 
-                    // Green dot for unseen update
-                    if updateManager.hasUnseenUpdate && viewModel.contentType != .menu {
-                        Circle()
-                            .fill(TerminalColors.green)
-                            .frame(width: 6, height: 6)
-                            .offset(x: -2, y: 2)
+                // Token rings in expanded header
+                if self.shouldShowTokenRingsExpanded {
+                    self.minimizedTokenRings
+                        .matchedGeometryEffect(id: "token-rings", in: self.activityNamespace, isSource: self.viewModel.status == .opened)
+                }
+
+                // Menu toggle
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        self.viewModel.toggleMenu()
+                        if self.viewModel.contentType == .menu {
+                            self.updateManager.markUpdateSeen()
+                        }
+                    }
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: self.viewModel.contentType == .menu ? "xmark" : "line.3.horizontal")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.4))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+
+                        // Green dot for unseen update
+                        if self.updateManager.hasUnseenUpdate && self.viewModel.contentType != .menu {
+                            Circle()
+                                .fill(TerminalColors.green)
+                                .frame(width: 6, height: 6)
+                                .offset(x: -2, y: 2)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Content View (Opened State)
 
-    @ViewBuilder
     private var contentView: some View {
         Group {
-            switch viewModel.contentType {
+            switch self.viewModel.contentType {
             case .instances:
                 ClaudeInstancesView(
-                    sessionMonitor: sessionMonitor,
-                    viewModel: viewModel
+                    sessionMonitor: self.sessionMonitor,
+                    viewModel: self.viewModel,
                 )
             case .menu:
-                NotchMenuView(viewModel: viewModel)
-            case .chat(let session):
+                NotchMenuView(viewModel: self.viewModel)
+            case let .chat(session):
                 ChatView(
-                    sessionId: session.sessionId,
+                    sessionID: session.sessionID,
                     initialSession: session,
-                    sessionMonitor: sessionMonitor,
-                    viewModel: viewModel
+                    sessionMonitor: self.sessionMonitor,
+                    viewModel: self.viewModel,
                 )
             }
         }
-        .frame(width: notchSize.width - 24) // Fixed width to prevent text reflow
+        .frame(width: self.notchSize.width - 24) // Fixed width to prevent text reflow
         // Removed .id() - was causing view recreation and performance issues
     }
 
     // MARK: - Event Handlers
 
     private func handleProcessingChange() {
-        if isAnyProcessing || hasPendingPermission {
+        if self.isAnyProcessing || self.hasPendingPermission {
             // Show claude activity when processing or waiting for permission
-            activityCoordinator.showActivity(type: .claude)
-            isVisible = true
-        } else if hasWaitingForInput {
+            self.activityCoordinator.showActivity(type: .claude)
+            self.isVisible = true
+            self.hideVisibilityTask?.cancel()
+        } else if self.hasWaitingForInput {
             // Keep visible for waiting-for-input but hide the processing spinner
-            activityCoordinator.hideActivity()
-            isVisible = true
+            self.activityCoordinator.hideActivity()
+            self.isVisible = true
+            self.hideVisibilityTask?.cancel()
+        } else if self.clawdAlwaysVisible {
+            // Keep visible when always-visible is enabled, but hide processing spinner
+            self.activityCoordinator.hideActivity()
+            self.isVisible = true
+            self.hideVisibilityTask?.cancel()
         } else {
             // Hide activity when done
-            activityCoordinator.hideActivity()
+            self.activityCoordinator.hideActivity()
 
             // Delay hiding the notch until animation completes
             // Don't hide on non-notched devices - users need a visible target
-            if viewModel.status == .closed && viewModel.hasPhysicalNotch {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && viewModel.status == .closed {
-                        isVisible = false
+            if self.viewModel.status == .closed && self.viewModel.hasPhysicalNotch {
+                self.hideVisibilityTask?.cancel()
+                self.hideVisibilityTask = Task(name: "hide-notch-processing") {
+                    try? await Task.sleep(for: .seconds(0.5))
+                    guard !Task.isCancelled else { return }
+                    if !self.isAnyProcessing && !self.hasPendingPermission && !self.hasWaitingForInput
+                        && !self.hasMultipleActiveSessions && !self.needsAccessibilityWarning
+                        && !self.clawdAlwaysVisible && self.viewModel.status == .closed {
+                        self.isVisible = false
                     }
                 }
             }
@@ -398,66 +622,90 @@ struct NotchView: View {
 
     private func handleStatusChange(from oldStatus: NotchStatus, to newStatus: NotchStatus) {
         switch newStatus {
-        case .opened, .popping:
-            isVisible = true
+        case .opened,
+             .popping:
+            self.isVisible = true
+            self.hideVisibilityTask?.cancel()
             // Clear waiting-for-input timestamps only when manually opened (user acknowledged)
-            if viewModel.openReason == .click || viewModel.openReason == .hover {
-                waitingForInputTimestamps.removeAll()
+            if self.viewModel.openReason == .click || self.viewModel.openReason == .hover {
+                self.waitingForInputTimestamps.removeAll()
             }
         case .closed:
             // Don't hide on non-notched devices - users need a visible target
-            guard viewModel.hasPhysicalNotch else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !activityCoordinator.expandingActivity.show {
-                    isVisible = false
+            guard self.viewModel.hasPhysicalNotch else { return }
+            // Don't hide when always-visible is enabled
+            guard !self.clawdAlwaysVisible else { return }
+            self.hideVisibilityTask?.cancel()
+            self.hideVisibilityTask = Task(name: "hide-notch-close") {
+                try? await Task.sleep(for: .seconds(0.35))
+                guard !Task.isCancelled else { return }
+                if self.viewModel.status == .closed && !self.isAnyProcessing && !self.hasPendingPermission
+                    && !self.hasWaitingForInput && !self.hasMultipleActiveSessions && !self.needsAccessibilityWarning
+                    && !self.clawdAlwaysVisible && !self.activityCoordinator.expandingActivity.show {
+                    self.isVisible = false
                 }
             }
         }
     }
 
     private func handlePendingSessionsChange(_ sessions: [SessionState]) {
-        let currentIds = Set(sessions.map { $0.stableId })
-        let newPendingIds = currentIds.subtracting(previousPendingIds)
+        let currentIDs = Set(sessions.map(\.stableID))
+        let newPendingIDs = currentIDs.subtracting(self.previousPendingIDs)
 
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
-            viewModel.notchOpen(reason: .notification)
+        if !newPendingIDs.isEmpty &&
+            self.viewModel.status == .closed &&
+            !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+            self.viewModel.notchOpen(reason: .notification)
         }
 
-        previousPendingIds = currentIds
+        self.previousPendingIDs = currentIDs
     }
 
     private func handleWaitingForInputChange(_ instances: [SessionState]) {
         // Get sessions that are now waiting for input
         let waitingForInputSessions = instances.filter { $0.phase == .waitingForInput }
-        let currentIds = Set(waitingForInputSessions.map { $0.stableId })
-        let newWaitingIds = currentIds.subtracting(previousWaitingForInputIds)
+        let currentIDs = Set(waitingForInputSessions.map(\.stableID))
+        let newWaitingIDs = currentIDs.subtracting(self.previousWaitingForInputIDs)
 
         // Track timestamps for newly waiting sessions
         let now = Date()
-        for session in waitingForInputSessions where newWaitingIds.contains(session.stableId) {
-            waitingForInputTimestamps[session.stableId] = now
+        for session in waitingForInputSessions where newWaitingIDs.contains(session.stableID) {
+            waitingForInputTimestamps[session.stableID] = now
         }
 
         // Clean up timestamps for sessions no longer waiting
-        let staleIds = Set(waitingForInputTimestamps.keys).subtracting(currentIds)
-        for staleId in staleIds {
-            waitingForInputTimestamps.removeValue(forKey: staleId)
+        let staleIDs = Set(waitingForInputTimestamps.keys).subtracting(currentIDs)
+        for staleID in staleIDs {
+            self.waitingForInputTimestamps.removeValue(forKey: staleID)
         }
 
         // Bounce the notch when a session newly enters waitingForInput state
-        if !newWaitingIds.isEmpty {
-            // Get the sessions that just entered waitingForInput
-            let newlyWaitingSessions = waitingForInputSessions.filter { newWaitingIds.contains($0.stableId) }
+        if !newWaitingIDs.isEmpty {
+            // Get the sessions that just entered waitingForInput, excluding context resumes
+            let newlyWaitingSessions = waitingForInputSessions.filter { session in
+                guard newWaitingIDs.contains(session.stableID) else { return false }
+
+                // Don't alert for context resume (ran out of context window)
+                if let lastMessage = session.lastMessage,
+                   lastMessage.hasPrefix(contextResumePrefix) {
+                    return false
+                }
+                return true
+            }
+
+            // Skip all alerts if only context resumes remain
+            guard !newlyWaitingSessions.isEmpty else {
+                self.previousWaitingForInputIDs = currentIDs
+                return
+            }
 
             // Play notification sound if the session is not actively focused
             if let soundName = AppSettings.notificationSound.soundName {
                 // Check if we should play sound (async check for tmux pane focus)
-                Task {
+                Task(name: "notification-sound") {
                     let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
                     if shouldPlaySound {
-                        await MainActor.run {
+                        _ = await MainActor.run {
                             NSSound(named: soundName)?.play()
                         }
                     }
@@ -465,39 +713,72 @@ struct NotchView: View {
             }
 
             // Trigger bounce animation to get user's attention
-            DispatchQueue.main.async {
-                isBouncing = true
+            self.bounceTask?.cancel()
+            self.isBouncing = true
+            self.bounceTask = Task(name: "bounce-animation") {
                 // Bounce back after a short delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    isBouncing = false
-                }
+                try? await Task.sleep(for: .seconds(0.15))
+                guard !Task.isCancelled else { return }
+                self.isBouncing = false
             }
 
             // Schedule hiding the checkmark after 30 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [self] in
+            self.checkmarkHideTask?.cancel()
+            self.checkmarkHideTask = Task(name: "checkmark-hide") {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
                 // Trigger a UI update to re-evaluate hasWaitingForInput
-                handleProcessingChange()
+                self.handleProcessingChange()
             }
         }
 
-        previousWaitingForInputIds = currentIds
+        self.previousWaitingForInputIDs = currentIDs
     }
 
     /// Determine if notification sound should play for the given sessions
-    /// Returns true if ANY session is not actively focused
+    /// Returns true if sound should play based on suppression settings
     private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
+        let suppressionMode = AppSettings.soundSuppression
+
+        // If suppression is disabled, always play sound
+        if suppressionMode == .never {
+            return true
+        }
+
+        // Suppress if Claude Island is active
+        if NSApplication.shared.isActive {
+            return false
+        }
+
+        // Check each session against the suppression mode
         for session in sessions {
             guard let pid = session.pid else {
-                // No PID means we can't check focus, assume not focused
+                // No PID means we can't check focus/visibility, assume should play
                 return true
             }
 
-            let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
-            if !isFocused {
+            switch suppressionMode {
+            case .never:
+                // Already handled above, but included for completeness
                 return true
+
+            case .whenFocused:
+                // Suppress if the session's terminal is focused
+                let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPID: pid)
+                if !isFocused {
+                    return true
+                }
+
+            case .whenVisible:
+                // Suppress if the session's terminal window is ≥50% visible
+                let isVisible = await TerminalVisibilityDetector.isSessionTerminalVisible(sessionPID: pid)
+                if !isVisible {
+                    return true
+                }
             }
         }
 
+        // All sessions are suppressed
         return false
     }
 }

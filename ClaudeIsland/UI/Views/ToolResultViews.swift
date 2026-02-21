@@ -7,7 +7,9 @@
 
 import SwiftUI
 
-// MARK: - Tool Result Content Dispatcher
+// swiftlint:disable file_length
+
+// MARK: - ToolResultContent
 
 struct ToolResultContent: View {
     let tool: ToolCallItem
@@ -15,42 +17,42 @@ struct ToolResultContent: View {
     var body: some View {
         if let structured = tool.structuredResult {
             switch structured {
-            case .read(let r):
-                ReadResultContent(result: r)
-            case .edit(let r):
-                EditResultContent(result: r, toolInput: tool.input)
-            case .write(let r):
-                WriteResultContent(result: r)
-            case .bash(let r):
-                BashResultContent(result: r)
-            case .grep(let r):
-                GrepResultContent(result: r)
-            case .glob(let r):
-                GlobResultContent(result: r)
-            case .todoWrite(let r):
-                TodoWriteResultContent(result: r)
-            case .task(let r):
-                TaskResultContent(result: r)
-            case .webFetch(let r):
-                WebFetchResultContent(result: r)
-            case .webSearch(let r):
-                WebSearchResultContent(result: r)
-            case .askUserQuestion(let r):
-                AskUserQuestionResultContent(result: r)
-            case .bashOutput(let r):
-                BashOutputResultContent(result: r)
-            case .killShell(let r):
-                KillShellResultContent(result: r)
-            case .exitPlanMode(let r):
-                ExitPlanModeResultContent(result: r)
-            case .mcp(let r):
-                MCPResultContent(result: r)
-            case .generic(let r):
-                GenericResultContent(result: r)
+            case let .read(result):
+                ReadResultContent(result: result)
+            case let .edit(result):
+                EditResultContent(result: result, toolInput: self.tool.input)
+            case let .write(result):
+                WriteResultContent(result: result)
+            case let .bash(result):
+                BashResultContent(result: result)
+            case let .grep(result):
+                GrepResultContent(result: result)
+            case let .glob(result):
+                GlobResultContent(result: result)
+            case let .todoWrite(result):
+                TodoWriteResultContent(result: result)
+            case let .task(result):
+                TaskResultContent(result: result)
+            case let .webFetch(result):
+                WebFetchResultContent(result: result)
+            case let .webSearch(result):
+                WebSearchResultContent(result: result)
+            case let .askUserQuestion(result):
+                AskUserQuestionResultContent(result: result)
+            case let .bashOutput(result):
+                BashOutputResultContent(result: result)
+            case let .killShell(result):
+                KillShellResultContent(result: result)
+            case let .exitPlanMode(result):
+                ExitPlanModeResultContent(result: result)
+            case let .mcp(result):
+                MCPResultContent(result: result)
+            case let .generic(result):
+                GenericResultContent(result: result)
             }
-        } else if tool.name == "Edit" {
+        } else if self.tool.name == "Edit" {
             // Special fallback for Edit - show diff from input params
-            EditInputDiffView(input: tool.input)
+            EditInputDiffView(input: self.tool.input)
         } else if let result = tool.result {
             // Fallback to raw text display
             GenericTextContent(text: result)
@@ -60,10 +62,23 @@ struct ToolResultContent: View {
     }
 }
 
-// MARK: - Edit Input Diff View (fallback when no structured result)
+// MARK: - EditInputDiffView
 
 struct EditInputDiffView: View {
+    // MARK: Internal
+
     let input: [String: String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Show diff from input with integrated filename
+            if !self.oldString.isEmpty || !self.newString.isEmpty {
+                SimpleDiffView(oldString: self.oldString, newString: self.newString, filename: self.filename)
+            }
+        }
+    }
+
+    // MARK: Private
 
     private var filename: String {
         if let path = input["file_path"] {
@@ -73,80 +88,75 @@ struct EditInputDiffView: View {
     }
 
     private var oldString: String {
-        input["old_string"] ?? ""
+        self.input["old_string"] ?? ""
     }
 
     private var newString: String {
-        input["new_string"] ?? ""
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Show diff from input with integrated filename
-            if !oldString.isEmpty || !newString.isEmpty {
-                SimpleDiffView(oldString: oldString, newString: newString, filename: filename)
-            }
-        }
+        self.input["new_string"] ?? ""
     }
 }
 
-// MARK: - Read Result View
+// MARK: - ReadResultContent
 
 struct ReadResultContent: View {
     let result: ReadResult
 
     var body: some View {
-        if !result.content.isEmpty {
+        if !self.result.content.isEmpty {
             FileCodeView(
-                filename: result.filename,
-                content: result.content,
-                startLine: result.startLine,
-                totalLines: result.totalLines,
-                maxLines: 10
+                filename: self.result.filename,
+                content: self.result.content,
+                startLine: self.result.startLine,
+                totalLines: self.result.totalLines,
+                maxLines: 10,
             )
         }
     }
 }
 
-// MARK: - Edit Result View
+// MARK: - EditResultContent
 
 struct EditResultContent: View {
+    // MARK: Internal
+
     let result: EditResult
     var toolInput: [String: String] = [:]
-
-    /// Get old string - prefer result, fallback to input
-    private var oldString: String {
-        if !result.oldString.isEmpty {
-            return result.oldString
-        }
-        return toolInput["old_string"] ?? ""
-    }
-
-    /// Get new string - prefer result, fallback to input
-    private var newString: String {
-        if !result.newString.isEmpty {
-            return result.newString
-        }
-        return toolInput["new_string"] ?? ""
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Always use SimpleDiffView for consistent styling (no @@ headers)
-            if !oldString.isEmpty || !newString.isEmpty {
-                SimpleDiffView(oldString: oldString, newString: newString, filename: result.filename)
+            if !self.oldString.isEmpty || !self.newString.isEmpty {
+                SimpleDiffView(oldString: self.oldString, newString: self.newString, filename: self.result.filename)
             }
 
-            if result.userModified {
+            if self.result.userModified {
                 Text("(User modified)")
                     .font(.system(size: 10))
                     .foregroundColor(.orange.opacity(0.7))
             }
         }
     }
+
+    // MARK: Private
+
+    /// Get old string - prefer result, fallback to input
+    private var oldString: String {
+        if !self.result.oldString.isEmpty {
+            return self.result.oldString
+        }
+        return self.toolInput["old_string"] ?? ""
+    }
+
+    /// Get new string - prefer result, fallback to input
+    private var newString: String {
+        if !self.result.newString.isEmpty {
+            return self.result.newString
+        }
+        return self.toolInput["new_string"] ?? ""
+    }
 }
 
-// MARK: - Write Result View
+// MARK: - WriteResultContent
 
 struct WriteResultContent: View {
     let result: WriteResult
@@ -155,17 +165,17 @@ struct WriteResultContent: View {
         VStack(alignment: .leading, spacing: 6) {
             // Action and filename
             HStack(spacing: 4) {
-                Text(result.type == .create ? "Created" : "Wrote")
+                Text(self.result.type == .create ? "Created" : "Wrote")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.5))
-                Text(result.filename)
+                Text(self.result.filename)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.white.opacity(0.7))
             }
 
             // Content preview for new files
-            if result.type == .create && !result.content.isEmpty {
-                CodePreview(content: result.content, maxLines: 8)
+            if self.result.type == .create && !self.result.content.isEmpty {
+                CodePreview(content: self.result.content, maxLines: 8)
             } else if let patches = result.structuredPatch, !patches.isEmpty {
                 DiffView(patches: patches)
             }
@@ -173,7 +183,7 @@ struct WriteResultContent: View {
     }
 }
 
-// MARK: - Bash Result View
+// MARK: - BashResultContent
 
 struct BashResultContent: View {
     let result: BashResult
@@ -181,11 +191,11 @@ struct BashResultContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // Background task indicator
-            if let bgId = result.backgroundTaskId {
+            if let bgID = result.backgroundTaskID {
                 HStack(spacing: 4) {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 10))
-                    Text("Background task: \(bgId)")
+                    Text("Background task: \(bgID)")
                         .font(.system(size: 10, design: .monospaced))
                 }
                 .foregroundColor(.blue.opacity(0.7))
@@ -199,17 +209,17 @@ struct BashResultContent: View {
             }
 
             // Stdout
-            if !result.stdout.isEmpty {
-                CodePreview(content: result.stdout, maxLines: 15)
+            if !self.result.stdout.isEmpty {
+                CodePreview(content: self.result.stdout, maxLines: 15)
             }
 
             // Stderr (shown in red)
-            if !result.stderr.isEmpty {
+            if !self.result.stderr.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("stderr:")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.red.opacity(0.7))
-                    Text(result.stderr)
+                    Text(self.result.stderr)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.red.opacity(0.8))
                         .lineLimit(10)
@@ -217,7 +227,7 @@ struct BashResultContent: View {
             }
 
             // Empty state
-            if !result.hasOutput && result.backgroundTaskId == nil && result.returnCodeInterpretation == nil {
+            if !self.result.hasOutput && self.result.backgroundTaskID == nil && self.result.returnCodeInterpretation == nil {
                 Text("(No content)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
@@ -226,22 +236,22 @@ struct BashResultContent: View {
     }
 }
 
-// MARK: - Grep Result View
+// MARK: - GrepResultContent
 
 struct GrepResultContent: View {
     let result: GrepResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            switch result.mode {
+            switch self.result.mode {
             case .filesWithMatches:
                 // Show file list
-                if result.filenames.isEmpty {
+                if self.result.filenames.isEmpty {
                     Text("No matches found")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white.opacity(0.3))
                 } else {
-                    FileListView(files: result.filenames, limit: 10)
+                    FileListView(files: self.result.filenames, limit: 10)
                 }
 
             case .content:
@@ -255,7 +265,7 @@ struct GrepResultContent: View {
                 }
 
             case .count:
-                Text("\(result.numFiles) files with matches")
+                Text("\(self.result.numFiles) files with matches")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -263,21 +273,21 @@ struct GrepResultContent: View {
     }
 }
 
-// MARK: - Glob Result View
+// MARK: - GlobResultContent
 
 struct GlobResultContent: View {
     let result: GlobResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if result.filenames.isEmpty {
+            if self.result.filenames.isEmpty {
                 Text("No files found")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
             } else {
-                FileListView(files: result.filenames, limit: 10)
+                FileListView(files: self.result.filenames, limit: 10)
 
-                if result.truncated {
+                if self.result.truncated {
                     Text("... and more (truncated)")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.3))
@@ -287,19 +297,21 @@ struct GlobResultContent: View {
     }
 }
 
-// MARK: - TodoWrite Result View
+// MARK: - TodoWriteResultContent
 
 struct TodoWriteResultContent: View {
+    // MARK: Internal
+
     let result: TodoWriteResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(result.newTodos.enumerated()), id: \.offset) { _, todo in
+            ForEach(Array(self.result.newTodos.enumerated()), id: \.offset) { _, todo in
                 HStack(spacing: 6) {
                     // Status icon
-                    Image(systemName: todoIcon(for: todo.status))
+                    Image(systemName: self.todoIcon(for: todo.status))
                         .font(.system(size: 10))
-                        .foregroundColor(todoColor(for: todo.status))
+                        .foregroundColor(self.todoColor(for: todo.status))
                         .frame(width: 12)
 
                     Text(todo.content)
@@ -312,38 +324,42 @@ struct TodoWriteResultContent: View {
         }
     }
 
+    // MARK: Private
+
     private func todoIcon(for status: String) -> String {
         switch status {
-        case "completed": return "checkmark.circle.fill"
-        case "in_progress": return "circle.lefthalf.filled"
-        default: return "circle"
+        case "completed": "checkmark.circle.fill"
+        case "in_progress": "circle.lefthalf.filled"
+        default: "circle"
         }
     }
 
     private func todoColor(for status: String) -> Color {
         switch status {
-        case "completed": return .green.opacity(0.7)
-        case "in_progress": return .orange.opacity(0.7)
-        default: return .white.opacity(0.4)
+        case "completed": .green.opacity(0.7)
+        case "in_progress": .orange.opacity(0.7)
+        default: .white.opacity(0.4)
         }
     }
 }
 
-// MARK: - Task Result View
+// MARK: - TaskResultContent
 
 struct TaskResultContent: View {
+    // MARK: Internal
+
     let result: TaskResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Status and stats
             HStack(spacing: 8) {
-                Text(result.status.capitalized)
+                Text(self.result.status.capitalized)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(statusColor)
+                    .foregroundColor(self.statusColor)
 
                 if let duration = result.totalDurationMs {
-                    Text("\(formatDuration(duration))")
+                    Text("\(self.formatDuration(duration))")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.white.opacity(0.4))
                 }
@@ -356,8 +372,8 @@ struct TaskResultContent: View {
             }
 
             // Content summary
-            if !result.content.isEmpty {
-                Text(result.content.prefix(200) + (result.content.count > 200 ? "..." : ""))
+            if !self.result.content.isEmpty {
+                Text(self.result.content.prefix(200) + (self.result.content.count > 200 ? "..." : ""))
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.6))
                     .lineLimit(5)
@@ -365,12 +381,15 @@ struct TaskResultContent: View {
         }
     }
 
+    // MARK: Private
+
     private var statusColor: Color {
-        switch result.status {
-        case "completed": return .green.opacity(0.7)
-        case "in_progress": return .orange.opacity(0.7)
-        case "failed", "error": return .red.opacity(0.7)
-        default: return .white.opacity(0.5)
+        switch self.result.status {
+        case "completed": .green.opacity(0.7)
+        case "in_progress": .orange.opacity(0.7)
+        case "failed",
+             "error": .red.opacity(0.7)
+        default: .white.opacity(0.5)
         }
     }
 
@@ -384,28 +403,30 @@ struct TaskResultContent: View {
     }
 }
 
-// MARK: - WebFetch Result View
+// MARK: - WebFetchResultContent
 
 struct WebFetchResultContent: View {
+    // MARK: Internal
+
     let result: WebFetchResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // URL and status
             HStack(spacing: 6) {
-                Text("\(result.code)")
+                Text("\(self.result.code)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(result.code < 400 ? .green.opacity(0.7) : .red.opacity(0.7))
+                    .foregroundColor(self.result.code < 400 ? .green.opacity(0.7) : .red.opacity(0.7))
 
-                Text(truncateUrl(result.url))
+                Text(self.truncateURL(self.result.url))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.5))
                     .lineLimit(1)
             }
 
             // Result summary
-            if !result.result.isEmpty {
-                Text(result.result.prefix(300) + (result.result.count > 300 ? "..." : ""))
+            if !self.result.result.isEmpty {
+                Text(self.result.result.prefix(300) + (self.result.result.count > 300 ? "..." : ""))
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.6))
                     .lineLimit(8)
@@ -413,7 +434,9 @@ struct WebFetchResultContent: View {
         }
     }
 
-    private func truncateUrl(_ url: String) -> String {
+    // MARK: Private
+
+    private func truncateURL(_ url: String) -> String {
         if url.count > 50 {
             return String(url.prefix(47)) + "..."
         }
@@ -421,19 +444,19 @@ struct WebFetchResultContent: View {
     }
 }
 
-// MARK: - WebSearch Result View
+// MARK: - WebSearchResultContent
 
 struct WebSearchResultContent: View {
     let result: WebSearchResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if result.results.isEmpty {
+            if self.result.results.isEmpty {
                 Text("No results found")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
             } else {
-                ForEach(Array(result.results.prefix(5).enumerated()), id: \.offset) { _, item in
+                ForEach(Array(self.result.results.prefix(5).enumerated()), id: \.offset) { _, item in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.title)
                             .font(.system(size: 11, weight: .medium))
@@ -449,8 +472,8 @@ struct WebSearchResultContent: View {
                     }
                 }
 
-                if result.results.count > 5 {
-                    Text("... and \(result.results.count - 5) more results")
+                if self.result.results.count > 5 {
+                    Text("... and \(self.result.results.count - 5) more results")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.3))
                 }
@@ -459,14 +482,14 @@ struct WebSearchResultContent: View {
     }
 }
 
-// MARK: - AskUserQuestion Result View
+// MARK: - AskUserQuestionResultContent
 
 struct AskUserQuestionResultContent: View {
     let result: AskUserQuestionResult
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(result.questions.enumerated()), id: \.offset) { index, question in
+            ForEach(Array(self.result.questions.enumerated()), id: \.offset) { index, question in
                 VStack(alignment: .leading, spacing: 4) {
                     // Question
                     Text(question.question)
@@ -489,7 +512,7 @@ struct AskUserQuestionResultContent: View {
     }
 }
 
-// MARK: - BashOutput Result View
+// MARK: - BashOutputResultContent
 
 struct BashOutputResultContent: View {
     let result: BashOutputResult
@@ -498,7 +521,7 @@ struct BashOutputResultContent: View {
         VStack(alignment: .leading, spacing: 4) {
             // Status
             HStack(spacing: 6) {
-                Text("Status: \(result.status)")
+                Text("Status: \(self.result.status)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.5))
 
@@ -510,12 +533,12 @@ struct BashOutputResultContent: View {
             }
 
             // Output
-            if !result.stdout.isEmpty {
-                CodePreview(content: result.stdout, maxLines: 10)
+            if !self.result.stdout.isEmpty {
+                CodePreview(content: self.result.stdout, maxLines: 10)
             }
 
-            if !result.stderr.isEmpty {
-                Text(result.stderr)
+            if !self.result.stderr.isEmpty {
+                Text(self.result.stderr)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.red.opacity(0.7))
                     .lineLimit(5)
@@ -524,7 +547,7 @@ struct BashOutputResultContent: View {
     }
 }
 
-// MARK: - KillShell Result View
+// MARK: - KillShellResultContent
 
 struct KillShellResultContent: View {
     let result: KillShellResult
@@ -535,14 +558,14 @@ struct KillShellResultContent: View {
                 .font(.system(size: 11))
                 .foregroundColor(.red.opacity(0.6))
 
-            Text(result.message.isEmpty ? "Shell \(result.shellId) terminated" : result.message)
+            Text(self.result.message.isEmpty ? "Shell \(self.result.shellID) terminated" : self.result.message)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.white.opacity(0.5))
         }
     }
 }
 
-// MARK: - ExitPlanMode Result View
+// MARK: - ExitPlanModeResultContent
 
 struct ExitPlanModeResultContent: View {
     let result: ExitPlanModeResult
@@ -569,7 +592,7 @@ struct ExitPlanModeResultContent: View {
     }
 }
 
-// MARK: - MCP Result View
+// MARK: - MCPResultContent
 
 struct MCPResultContent: View {
     let result: MCPResult
@@ -580,18 +603,18 @@ struct MCPResultContent: View {
             HStack(spacing: 4) {
                 Image(systemName: "puzzlepiece")
                     .font(.system(size: 10))
-                Text("\(MCPToolFormatter.toTitleCase(result.serverName)) - \(MCPToolFormatter.toTitleCase(result.toolName))")
+                Text("\(MCPToolFormatter.toTitleCase(self.result.serverName)) - \(MCPToolFormatter.toTitleCase(self.result.toolName))")
                     .font(.system(size: 10, design: .monospaced))
             }
             .foregroundColor(.purple.opacity(0.7))
 
             // Raw result (formatted as key-value pairs)
-            ForEach(Array(result.rawResult.prefix(5)), id: \.key) { key, value in
+            ForEach(Array(self.result.rawResultEntries.prefix(5)), id: \.key) { key, value in
                 HStack(alignment: .top, spacing: 4) {
                     Text("\(key):")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.white.opacity(0.4))
-                    Text("\(String(describing: value).prefix(100))")
+                    Text("\(value.prefix(100))")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(2)
@@ -601,7 +624,7 @@ struct MCPResultContent: View {
     }
 }
 
-// MARK: - Generic Result View
+// MARK: - GenericResultContent
 
 struct GenericResultContent: View {
     let result: GenericResult
@@ -617,42 +640,30 @@ struct GenericResultContent: View {
     }
 }
 
+// MARK: - GenericTextContent
+
 struct GenericTextContent: View {
     let text: String
 
     var body: some View {
-        Text(text)
+        Text(self.text)
             .font(.system(size: 11, design: .monospaced))
             .foregroundColor(.white.opacity(0.5))
             .lineLimit(15)
     }
 }
 
-// MARK: - Helper Views
+// MARK: - FileCodeView
 
 /// File code view with filename header and line numbers (matches Edit tool styling)
 struct FileCodeView: View {
+    // MARK: Internal
+
     let filename: String
     let content: String
     let startLine: Int
     let totalLines: Int
     let maxLines: Int
-
-    private var lines: [String] {
-        content.components(separatedBy: "\n")
-    }
-
-    private var displayLines: [String] {
-        Array(lines.prefix(maxLines))
-    }
-
-    private var hasMoreAfter: Bool {
-        lines.count > maxLines
-    }
-
-    private var hasLinesBefore: Bool {
-        startLine > 1
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -661,7 +672,7 @@ struct FileCodeView: View {
                 Image(systemName: "doc.text")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
-                Text(filename)
+                Text(self.filename)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(.white.opacity(0.7))
             }
@@ -672,7 +683,7 @@ struct FileCodeView: View {
             .clipShape(RoundedCorner(radius: 6, corners: [.topLeft, .topRight]))
 
             // Top overflow indicator
-            if hasLinesBefore {
+            if self.hasLinesBefore {
                 Text("...")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
@@ -683,19 +694,19 @@ struct FileCodeView: View {
             }
 
             // Code lines with line numbers
-            ForEach(Array(displayLines.enumerated()), id: \.offset) { index, line in
-                let lineNumber = startLine + index
-                let isLast = index == displayLines.count - 1 && !hasMoreAfter
+            ForEach(Array(self.displayLines.enumerated()), id: \.offset) { index, line in
+                let lineNumber = self.startLine + index
+                let isLast = index == self.displayLines.count - 1 && !self.hasMoreAfter
                 CodeLineView(
                     line: line,
                     lineNumber: lineNumber,
-                    isLast: isLast
+                    isLast: isLast,
                 )
             }
 
             // Bottom overflow indicator
-            if hasMoreAfter {
-                Text("... (\(lines.count - maxLines) more lines)")
+            if self.hasMoreAfter {
+                Text("... (\(self.lines.count - self.maxLines) more lines)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -707,6 +718,8 @@ struct FileCodeView: View {
         }
     }
 
+    // MARK: Private
+
     private struct CodeLineView: View {
         let line: String
         let lineNumber: Int
@@ -715,14 +728,14 @@ struct FileCodeView: View {
         var body: some View {
             HStack(spacing: 0) {
                 // Line number
-                Text("\(lineNumber)")
+                Text("\(self.lineNumber)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
                     .frame(width: 28, alignment: .trailing)
                     .padding(.trailing, 8)
 
                 // Line content
-                Text(line.isEmpty ? " " : line)
+                Text(self.line.isEmpty ? " " : self.line)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.white.opacity(0.7))
                     .lineLimit(1)
@@ -731,19 +744,37 @@ struct FileCodeView: View {
             .padding(.trailing, 4)
             .padding(.vertical, 2)
             .background(Color.white.opacity(0.06))
-            .clipShape(RoundedCorner(radius: 6, corners: isLast ? [.bottomLeft, .bottomRight] : []))
+            .clipShape(RoundedCorner(radius: 6, corners: self.isLast ? [.bottomLeft, .bottomRight] : []))
         }
     }
+
+    private var lines: [String] {
+        self.content.components(separatedBy: "\n")
+    }
+
+    private var displayLines: [String] {
+        Array(self.lines.prefix(self.maxLines))
+    }
+
+    private var hasMoreAfter: Bool {
+        self.lines.count > self.maxLines
+    }
+
+    private var hasLinesBefore: Bool {
+        self.startLine > 1
+    }
 }
+
+// MARK: - CodePreview
 
 struct CodePreview: View {
     let content: String
     let maxLines: Int
 
     var body: some View {
-        let lines = content.components(separatedBy: "\n")
-        let displayLines = Array(lines.prefix(maxLines))
-        let hasMore = lines.count > maxLines
+        let lines = self.content.components(separatedBy: "\n")
+        let displayLines = Array(lines.prefix(self.maxLines))
+        let hasMore = lines.count > self.maxLines
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
@@ -753,7 +784,7 @@ struct CodePreview: View {
             }
 
             if hasMore {
-                Text("... (\(lines.count - maxLines) more lines)")
+                Text("... (\(lines.count - self.maxLines) more lines)")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.3))
                     .padding(.top, 2)
@@ -762,13 +793,15 @@ struct CodePreview: View {
     }
 }
 
+// MARK: - FileListView
+
 struct FileListView: View {
     let files: [String]
     let limit: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(files.prefix(limit).enumerated()), id: \.offset) { _, file in
+            ForEach(Array(self.files.prefix(self.limit).enumerated()), id: \.offset) { _, file in
                 HStack(spacing: 4) {
                     Image(systemName: "doc")
                         .font(.system(size: 9))
@@ -780,8 +813,8 @@ struct FileListView: View {
                 }
             }
 
-            if files.count > limit {
-                Text("... and \(files.count - limit) more files")
+            if self.files.count > self.limit {
+                Text("... and \(self.files.count - self.limit) more files")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.3))
             }
@@ -789,12 +822,14 @@ struct FileListView: View {
     }
 }
 
+// MARK: - DiffView
+
 struct DiffView: View {
     let patches: [PatchHunk]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(patches.prefix(3).enumerated()), id: \.offset) { _, patch in
+            ForEach(Array(self.patches.prefix(3).enumerated()), id: \.offset) { _, patch in
                 VStack(alignment: .leading, spacing: 1) {
                     // Hunk header
                     Text("@@ -\(patch.oldStart),\(patch.oldLines) +\(patch.newStart),\(patch.newLines) @@")
@@ -814,8 +849,8 @@ struct DiffView: View {
                 }
             }
 
-            if patches.count > 3 {
-                Text("... and \(patches.count - 3) more hunks")
+            if self.patches.count > 3 {
+                Text("... and \(self.patches.count - 3) more hunks")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.3))
             }
@@ -823,145 +858,77 @@ struct DiffView: View {
     }
 }
 
+// MARK: - DiffLineView
+
 struct DiffLineView: View {
+    // MARK: Internal
+
     let line: String
 
+    var body: some View {
+        Text(self.line)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundColor(self.lineType.textColor)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(self.lineType.backgroundColor)
+    }
+
+    // MARK: Private
+
     private var lineType: DiffLineType {
-        if line.hasPrefix("+") {
+        if self.line.hasPrefix("+") {
             return .added
-        } else if line.hasPrefix("-") {
+        } else if self.line.hasPrefix("-") {
             return .removed
         }
         return .context
     }
-
-    var body: some View {
-        Text(line)
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundColor(lineType.textColor)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(lineType.backgroundColor)
-    }
 }
+
+// MARK: - DiffLineType
 
 private enum DiffLineType {
     case added
     case removed
     case context
 
+    // MARK: Internal
+
     var textColor: Color {
         switch self {
-        case .added: return Color(red: 0.4, green: 0.8, blue: 0.4)
-        case .removed: return Color(red: 0.9, green: 0.5, blue: 0.5)
-        case .context: return .white.opacity(0.5)
+        case .added: Color(red: 0.4, green: 0.8, blue: 0.4)
+        case .removed: Color(red: 0.9, green: 0.5, blue: 0.5)
+        case .context: .white.opacity(0.5)
         }
     }
 
     var backgroundColor: Color {
         switch self {
-        case .added: return Color(red: 0.2, green: 0.4, blue: 0.2).opacity(0.3)
-        case .removed: return Color(red: 0.4, green: 0.2, blue: 0.2).opacity(0.3)
-        case .context: return .clear
+        case .added: Color(red: 0.2, green: 0.4, blue: 0.2).opacity(0.3)
+        case .removed: Color(red: 0.4, green: 0.2, blue: 0.2).opacity(0.3)
+        case .context: .clear
         }
     }
 }
 
+// MARK: - SimpleDiffView
+
 struct SimpleDiffView: View {
+    // MARK: Internal
+
     let oldString: String
     let newString: String
-    var filename: String? = nil
-
-    /// Compute diff using LCS algorithm
-    private var diffLines: [DiffLine] {
-        let oldLines = oldString.components(separatedBy: "\n")
-        let newLines = newString.components(separatedBy: "\n")
-
-        // Compute LCS to find matching lines
-        let lcs = computeLCS(oldLines, newLines)
-
-        var result: [DiffLine] = []
-        var oldIdx = 0
-        var newIdx = 0
-        var lcsIdx = 0
-
-        while oldIdx < oldLines.count || newIdx < newLines.count {
-            // Limit output
-            if result.count >= 12 { break }
-
-            let lcsLine = lcsIdx < lcs.count ? lcs[lcsIdx] : nil
-
-            if oldIdx < oldLines.count && (lcsLine == nil || oldLines[oldIdx] != lcsLine) {
-                // Line in old but not in LCS - removed
-                result.append(DiffLine(text: oldLines[oldIdx], type: .removed, lineNumber: oldIdx + 1))
-                oldIdx += 1
-            } else if newIdx < newLines.count && (lcsLine == nil || newLines[newIdx] != lcsLine) {
-                // Line in new but not in LCS - added
-                result.append(DiffLine(text: newLines[newIdx], type: .added, lineNumber: newIdx + 1))
-                newIdx += 1
-            } else {
-                // Matching line in LCS - skip (context)
-                oldIdx += 1
-                newIdx += 1
-                lcsIdx += 1
-            }
-        }
-
-        return result
-    }
-
-    /// Compute Longest Common Subsequence of two string arrays
-    private func computeLCS(_ a: [String], _ b: [String]) -> [String] {
-        let m = a.count
-        let n = b.count
-
-        // DP table
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-
-        for i in 1...m {
-            for j in 1...n {
-                if a[i - 1] == b[j - 1] {
-                    dp[i][j] = dp[i - 1][j - 1] + 1
-                } else {
-                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
-                }
-            }
-        }
-
-        // Backtrack to find LCS
-        var lcs: [String] = []
-        var i = m, j = n
-        while i > 0 && j > 0 {
-            if a[i - 1] == b[j - 1] {
-                lcs.append(a[i - 1])
-                i -= 1
-                j -= 1
-            } else if dp[i - 1][j] > dp[i][j - 1] {
-                i -= 1
-            } else {
-                j -= 1
-            }
-        }
-
-        return lcs.reversed()
-    }
-
-    private var hasMoreChanges: Bool {
-        let oldLines = oldString.components(separatedBy: "\n")
-        let newLines = newString.components(separatedBy: "\n")
-        let lcs = computeLCS(oldLines, newLines)
-        let totalChanges = (oldLines.count - lcs.count) + (newLines.count - lcs.count)
-        return totalChanges > 12
-    }
-
-    /// Whether there are lines before the first diff line
-    private var hasLinesBefore: Bool {
-        guard let firstLine = diffLines.first else { return false }
-        return firstLine.lineNumber > 1
-    }
+    var filename: String?
 
     var body: some View {
+        // Compute diff once per render pass (LCS is expensive)
+        let diff = self.computeDiffResult()
+        let diffLines = diff.lines
+        let hasMoreChanges = diff.hasMore
+        let hasLinesBefore = diffLines.first.map { $0.lineNumber > 1 } ?? false
+
         VStack(alignment: .leading, spacing: 0) {
             // Filename header
             if let name = filename {
@@ -989,19 +956,22 @@ struct SimpleDiffView: View {
                     .padding(.leading, 46)
                     .padding(.vertical, 3)
                     .background(Color.white.opacity(0.06))
-                    .clipShape(RoundedCorner(radius: 6, corners: filename == nil ? [.topLeft, .topRight] as RoundedCorner.RectCorner : [] as RoundedCorner.RectCorner))
+                    .clipShape(RoundedCorner(
+                        radius: 6,
+                        corners: self.filename == nil ? [.topLeft, .topRight] as RoundedCorner.RectCorner : [] as RoundedCorner.RectCorner,
+                    ))
             }
 
             // Diff lines
             ForEach(Array(diffLines.enumerated()), id: \.offset) { index, line in
-                let isFirst = index == 0 && filename == nil && !hasLinesBefore
+                let isFirst = index == 0 && self.filename == nil && !hasLinesBefore
                 let isLast = index == diffLines.count - 1 && !hasMoreChanges
                 DiffLineView(
                     line: line.text,
                     type: line.type,
                     lineNumber: line.lineNumber,
                     isFirst: isFirst,
-                    isLast: isLast
+                    isLast: isLast,
                 )
             }
 
@@ -1019,102 +989,235 @@ struct SimpleDiffView: View {
         }
     }
 
+    // MARK: Private
+
     private struct DiffLine {
         let text: String
         let type: DiffLineType
         let lineNumber: Int
     }
 
+    /// Cached diff computation result to avoid redundant LCS calculations
+    private struct DiffResult {
+        let lines: [DiffLine]
+        let hasMore: Bool
+        let totalChanges: Int
+    }
+
     private struct DiffLineView: View {
+        // MARK: Internal
+
         let line: String
         let type: DiffLineType
         let lineNumber: Int
         let isFirst: Bool
         let isLast: Bool
 
-        private var corners: RoundedCorner.RectCorner {
-            if isFirst && isLast {
-                return .allCorners
-            } else if isFirst {
-                return [.topLeft, .topRight]
-            } else if isLast {
-                return [.bottomLeft, .bottomRight]
-            }
-            return []
-        }
-
         var body: some View {
             HStack(spacing: 0) {
                 // Line number
-                Text("\(lineNumber)")
+                Text("\(self.lineNumber)")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(type.textColor.opacity(0.6))
+                    .foregroundColor(self.type.textColor.opacity(0.6))
                     .frame(width: 28, alignment: .trailing)
                     .padding(.trailing, 4)
 
                 // +/- indicator
-                Text(type == .added ? "+" : "-")
+                Text(self.type == .added ? "+" : "-")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(type.textColor)
+                    .foregroundColor(self.type.textColor)
                     .frame(width: 14)
 
                 // Line content
-                Text(line.isEmpty ? " " : line)
+                Text(self.line.isEmpty ? " " : self.line)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(type.textColor)
+                    .foregroundColor(self.type.textColor)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, 4)
             .padding(.vertical, 2)
-            .background(type.backgroundColor)
-            .clipShape(RoundedCorner(radius: 6, corners: corners))
+            .background(self.type.backgroundColor)
+            .clipShape(RoundedCorner(radius: 6, corners: self.corners))
         }
+
+        // MARK: Private
+
+        private var corners: RoundedCorner.RectCorner {
+            if self.isFirst && self.isLast {
+                return .allCorners
+            } else if self.isFirst {
+                return [.topLeft, .topRight]
+            } else if self.isLast {
+                return [.bottomLeft, .bottomRight]
+            }
+            return []
+        }
+    }
+
+    /// Compute Longest Common Subsequence using space-optimized DP
+    /// Uses O(min(n,m)) space instead of O(n*m) by keeping only two rows
+    private static func computeLCS(_ oldLines: [String], _ newLines: [String]) -> [String] {
+        let rowCount = oldLines.count
+        let colCount = newLines.count
+
+        // Early exit for empty inputs
+        guard rowCount > 0, colCount > 0 else { return [] }
+
+        // Space-optimized: only keep current and previous row
+        // Pre-allocate both rows
+        var prev = [Int](repeating: 0, count: colCount + 1)
+        var curr = [Int](repeating: 0, count: colCount + 1)
+
+        // Also track which elements are in LCS for backtracking
+        // Using a direction matrix for backtracking (0 = diagonal, 1 = up, 2 = left)
+        var directions = [[UInt8]](repeating: [UInt8](repeating: 0, count: colCount + 1), count: rowCount + 1)
+
+        for idx in 1 ... rowCount {
+            for jdx in 1 ... colCount {
+                if oldLines[idx - 1] == newLines[jdx - 1] {
+                    curr[jdx] = prev[jdx - 1] + 1
+                    directions[idx][jdx] = 0 // diagonal
+                } else if prev[jdx] > curr[jdx - 1] {
+                    curr[jdx] = prev[jdx]
+                    directions[idx][jdx] = 1 // up
+                } else {
+                    curr[jdx] = curr[jdx - 1]
+                    directions[idx][jdx] = 2 // left
+                }
+            }
+            swap(&prev, &curr)
+            // Reset curr for next iteration
+            for jdx in 0 ... colCount {
+                curr[jdx] = 0
+            }
+        }
+
+        // Backtrack using direction matrix
+        var lcs: [String] = []
+        lcs.reserveCapacity(prev[colCount])
+        var row = rowCount
+        var col = colCount
+        while row > 0 && col > 0 {
+            switch directions[row][col] {
+            case 0: // diagonal - match
+                lcs.append(oldLines[row - 1])
+                row -= 1
+                col -= 1
+            case 1: // up
+                row -= 1
+            default: // left
+                col -= 1
+            }
+        }
+
+        return lcs.reversed()
+    }
+
+    /// Compute diff using LCS algorithm - call once per render pass
+    private func computeDiffResult() -> DiffResult {
+        let oldLines = self.oldString.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let newLines = self.newString.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        // Compute LCS once
+        let lcs = Self.computeLCS(oldLines, newLines)
+        let totalChanges = (oldLines.count - lcs.count) + (newLines.count - lcs.count)
+
+        // Build diff lines (max 12)
+        var result: [DiffLine] = []
+        result.reserveCapacity(min(12, totalChanges))
+
+        var oldIdx = 0
+        var newIdx = 0
+        var lcsIdx = 0
+
+        while oldIdx < oldLines.count || newIdx < newLines.count {
+            if result.count >= 12 { break }
+
+            let lcsLine = lcsIdx < lcs.count ? lcs[lcsIdx] : nil
+
+            if oldIdx < oldLines.count && (lcsLine == nil || oldLines[oldIdx] != lcsLine) {
+                result.append(DiffLine(text: oldLines[oldIdx], type: .removed, lineNumber: oldIdx + 1))
+                oldIdx += 1
+            } else if newIdx < newLines.count && (lcsLine == nil || newLines[newIdx] != lcsLine) {
+                result.append(DiffLine(text: newLines[newIdx], type: .added, lineNumber: newIdx + 1))
+                newIdx += 1
+            } else {
+                oldIdx += 1
+                newIdx += 1
+                lcsIdx += 1
+            }
+        }
+
+        return DiffResult(lines: result, hasMore: totalChanges > 12, totalChanges: totalChanges)
     }
 }
 
-// Helper for selective corner rounding (macOS compatible)
+// MARK: - RoundedCorner
+
+/// Helper for selective corner rounding (macOS compatible)
 struct RoundedCorner: Shape {
+    struct RectCorner: OptionSet {
+        static let topLeft = Self(rawValue: 1 << 0)
+        static let topRight = Self(rawValue: 1 << 1)
+        static let bottomLeft = Self(rawValue: 1 << 2)
+        static let bottomRight = Self(rawValue: 1 << 3)
+        static let allCorners: RectCorner = [.topLeft, .topRight, .bottomLeft, .bottomRight]
+
+        let rawValue: Int
+    }
+
     var radius: CGFloat
     var corners: RectCorner
-
-    struct RectCorner: OptionSet {
-        let rawValue: Int
-        static let topLeft = RectCorner(rawValue: 1 << 0)
-        static let topRight = RectCorner(rawValue: 1 << 1)
-        static let bottomLeft = RectCorner(rawValue: 1 << 2)
-        static let bottomRight = RectCorner(rawValue: 1 << 3)
-        static let allCorners: RectCorner = [.topLeft, .topRight, .bottomLeft, .bottomRight]
-    }
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
 
-        let tl = corners.contains(.topLeft) ? radius : 0
-        let tr = corners.contains(.topRight) ? radius : 0
-        let bl = corners.contains(.bottomLeft) ? radius : 0
-        let br = corners.contains(.bottomRight) ? radius : 0
+        let tl = self.corners.contains(.topLeft) ? self.radius : 0
+        let tr = self.corners.contains(.topRight) ? self.radius : 0
+        let bl = self.corners.contains(.bottomLeft) ? self.radius : 0
+        let br = self.corners.contains(.bottomRight) ? self.radius : 0
 
         path.move(to: CGPoint(x: rect.minX + tl, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY))
         if tr > 0 {
-            path.addArc(center: CGPoint(x: rect.maxX - tr, y: rect.minY + tr),
-                       radius: tr, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+            path.addArc(
+                center: CGPoint(x: rect.maxX - tr, y: rect.minY + tr),
+                radius: tr,
+                startAngle: .degrees(-90),
+                endAngle: .degrees(0),
+                clockwise: false,
+            )
         }
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - br))
         if br > 0 {
-            path.addArc(center: CGPoint(x: rect.maxX - br, y: rect.maxY - br),
-                       radius: br, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+            path.addArc(
+                center: CGPoint(x: rect.maxX - br, y: rect.maxY - br),
+                radius: br,
+                startAngle: .degrees(0),
+                endAngle: .degrees(90),
+                clockwise: false,
+            )
         }
         path.addLine(to: CGPoint(x: rect.minX + bl, y: rect.maxY))
         if bl > 0 {
-            path.addArc(center: CGPoint(x: rect.minX + bl, y: rect.maxY - bl),
-                       radius: bl, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+            path.addArc(
+                center: CGPoint(x: rect.minX + bl, y: rect.maxY - bl),
+                radius: bl,
+                startAngle: .degrees(90),
+                endAngle: .degrees(180),
+                clockwise: false,
+            )
         }
         path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + tl))
         if tl > 0 {
-            path.addArc(center: CGPoint(x: rect.minX + tl, y: rect.minY + tl),
-                       radius: tl, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+            path.addArc(
+                center: CGPoint(x: rect.minX + tl, y: rect.minY + tl),
+                radius: tl,
+                startAngle: .degrees(180),
+                endAngle: .degrees(270),
+                clockwise: false,
+            )
         }
         path.closeSubpath()
 

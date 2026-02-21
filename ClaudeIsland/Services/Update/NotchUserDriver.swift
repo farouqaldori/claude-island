@@ -5,9 +5,11 @@
 //  Custom Sparkle user driver for in-notch update UI
 //
 
-import Combine
 import Foundation
-import Sparkle
+import Observation
+@preconcurrency import Sparkle
+
+// MARK: - UpdateState
 
 /// Update state published to UI
 enum UpdateState: Equatable {
@@ -15,75 +17,70 @@ enum UpdateState: Equatable {
     case checking
     case upToDate
     case found(version: String, releaseNotes: String?)
-    case downloading(progress: Double)  // 0.0 to 1.0
+    case downloading(progress: Double) // 0.0 to 1.0
     case extracting(progress: Double)
     case readyToInstall(version: String)
     case installing
     case error(message: String)
 
+    // MARK: Internal
+
     var isActive: Bool {
         switch self {
-        case .idle, .upToDate, .error:
-            return false
+        case .idle,
+             .upToDate,
+             .error:
+            false
         default:
-            return true
+            true
         }
     }
 }
 
+// MARK: - UpdateManager
+
 /// Observable update manager that bridges Sparkle to SwiftUI
-@MainActor
-class UpdateManager: NSObject, ObservableObject {
+@Observable
+final class UpdateManager {
+    // MARK: Internal
+
     static let shared = UpdateManager()
 
-    @Published var state: UpdateState = .idle
-    @Published var hasUnseenUpdate: Bool = false
-    private var hasSeenUpdateThisSession: Bool = false
-
-    private var downloadedBytes: Int64 = 0
-    private var expectedBytes: Int64 = 0
-    private var currentVersion: String = ""
-
-    // Callbacks from Sparkle
-    private var installHandler: ((SPUUserUpdateChoice) -> Void)?
-    private var cancellationHandler: (() -> Void)?
-
-    override init() {
-        super.init()
-    }
+    var state: UpdateState = .idle
+    var hasUnseenUpdate = false
 
     // MARK: - Public API
 
     func checkForUpdates() {
-        state = .checking
+        self.state = .checking
         if let updater = AppDelegate.shared?.updater {
             updater.checkForUpdates()
         } else {
-            state = .error(message: "Updater not initialized")
+            self.state = .error(message: "Updater not initialized")
         }
     }
 
     func downloadAndInstall() {
-        installHandler?(.install)
+        self.installHandler?(.install)
     }
 
     func installAndRelaunch() {
-        installHandler?(.install)
+        self.installHandler?(.install)
     }
 
     func skipUpdate() {
-        installHandler?(.skip)
-        state = .idle
+        self.installHandler?(.skip)
+        self.state = .idle
     }
 
     func dismissUpdate() {
-        installHandler?(.dismiss)
-        state = .idle
+        self.installHandler?(.dismiss)
+        self.state = .idle
     }
 
     func cancelDownload() {
-        cancellationHandler?()
-        state = .idle
+        self.cancellationHandler?()
+        self.state = .idle
     }
 
     // MARK: - Internal state updates (called by NotchUserDriver)
@@ -93,7 +90,7 @@ class UpdateManager: NSObject, ObservableObject {
         self.installHandler = installHandler
         self.state = .found(version: version, releaseNotes: releaseNotes)
         // Only show the dot if user hasn't seen it this session
-        if !hasSeenUpdateThisSession {
+        if !self.hasSeenUpdateThisSession {
             self.hasUnseenUpdate = true
         }
     }
@@ -116,7 +113,7 @@ class UpdateManager: NSObject, ObservableObject {
 
     func downloadReceivedData(_ length: UInt64) {
         self.downloadedBytes += Int64(length)
-        let progress = expectedBytes > 0 ? Double(downloadedBytes) / Double(expectedBytes) : 0
+        let progress = self.expectedBytes > 0 ? Double(self.downloadedBytes) / Double(self.expectedBytes) : 0
         self.state = .downloading(progress: min(progress, 1.0))
     }
 
@@ -130,7 +127,7 @@ class UpdateManager: NSObject, ObservableObject {
 
     func readyToInstall(installHandler: @escaping (SPUUserUpdateChoice) -> Void) {
         self.installHandler = installHandler
-        self.state = .readyToInstall(version: currentVersion)
+        self.state = .readyToInstall(version: self.currentVersion)
     }
 
     func installing() {
@@ -143,9 +140,12 @@ class UpdateManager: NSObject, ObservableObject {
 
     func noUpdateFound() {
         self.state = .upToDate
+        // Cancel any previous reset task
+        self.upToDateResetTask?.cancel()
         // Reset to idle after a few seconds
-        Task {
+        self.upToDateResetTask = Task(name: "update-state-reset") {
             try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
             if case .upToDate = self.state {
                 self.state = .idle
             }
@@ -158,19 +158,39 @@ class UpdateManager: NSObject, ObservableObject {
 
     func dismiss() {
         // Don't dismiss if we're showing "up to date" - let it display
-        if case .upToDate = state {
+        if case .upToDate = self.state {
             return
         }
+        self.upToDateResetTask?.cancel()
+        self.upToDateResetTask = nil
         self.state = .idle
         self.installHandler = nil
         self.cancellationHandler = nil
     }
+
+    // MARK: Private
+
+    private var hasSeenUpdateThisSession = false
+
+    private var downloadedBytes: Int64 = 0
+    private var expectedBytes: Int64 = 0
+    private var currentVersion = ""
+
+    // Callbacks from Sparkle
+    private var installHandler: ((SPUUserUpdateChoice) -> Void)?
+    private var cancellationHandler: (() -> Void)?
+
+    /// Task for delayed state reset after "up to date" message
+    private var upToDateResetTask: Task<Void, Never>?
 }
+
+// MARK: - NotchUserDriver
 
 /// Custom Sparkle user driver that routes all UI to NotchUpdateManager
 class NotchUserDriver: NSObject, SPUUserDriver {
-
-    var canCheckForUpdates: Bool { true }
+    var canCheckForUpdates: Bool {
+        true
+    }
 
     // MARK: - Update Found
 
@@ -180,7 +200,7 @@ class NotchUserDriver: NSObject, SPUUserDriver {
     }
 
     func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
-        Task { @MainActor in
+        Task(name: "update-checking") { @MainActor in
             UpdateManager.shared.state = .checking
         }
     }
@@ -189,7 +209,7 @@ class NotchUserDriver: NSObject, SPUUserDriver {
         let version = appcastItem.displayVersionString
         let releaseNotes = appcastItem.itemDescription
 
-        Task { @MainActor in
+        Task(name: "update-found") { @MainActor in
             UpdateManager.shared.updateFound(version: version, releaseNotes: releaseNotes, installHandler: reply)
         }
     }
@@ -203,14 +223,14 @@ class NotchUserDriver: NSObject, SPUUserDriver {
     }
 
     func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
-        Task { @MainActor in
+        Task(name: "update-not-found") { @MainActor in
             UpdateManager.shared.noUpdateFound()
         }
         acknowledgement()
     }
 
     func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
-        Task { @MainActor in
+        Task(name: "update-error") { @MainActor in
             UpdateManager.shared.updateError(error.localizedDescription)
         }
         acknowledgement()
@@ -219,56 +239,56 @@ class NotchUserDriver: NSObject, SPUUserDriver {
     // MARK: - Download Progress
 
     func showDownloadInitiated(cancellation: @escaping () -> Void) {
-        Task { @MainActor in
+        Task(name: "download-started") { @MainActor in
             UpdateManager.shared.downloadStarted(cancellation: cancellation)
         }
     }
 
     func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
-        Task { @MainActor in
+        Task(name: "download-length") { @MainActor in
             UpdateManager.shared.downloadExpectedLength(expectedContentLength)
         }
     }
 
     func showDownloadDidReceiveData(ofLength length: UInt64) {
-        Task { @MainActor in
+        Task(name: "download-progress") { @MainActor in
             UpdateManager.shared.downloadReceivedData(length)
         }
     }
 
     func showDownloadDidStartExtractingUpdate() {
-        Task { @MainActor in
+        Task(name: "extraction-started") { @MainActor in
             UpdateManager.shared.extractionStarted()
         }
     }
 
     func showExtractionReceivedProgress(_ progress: Double) {
-        Task { @MainActor in
+        Task(name: "extraction-progress") { @MainActor in
             UpdateManager.shared.extractionProgress(progress)
         }
     }
 
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        Task { @MainActor in
+        Task(name: "ready-to-install") { @MainActor in
             UpdateManager.shared.readyToInstall(installHandler: reply)
         }
     }
 
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
-        Task { @MainActor in
+        Task(name: "update-installing") { @MainActor in
             UpdateManager.shared.installing()
         }
     }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
-        Task { @MainActor in
+        Task(name: "update-installed") { @MainActor in
             UpdateManager.shared.installed(relaunched: relaunched)
         }
         acknowledgement()
     }
 
     func dismissUpdateInstallation() {
-        Task { @MainActor in
+        Task(name: "update-dismissed") { @MainActor in
             UpdateManager.shared.dismiss()
         }
     }
@@ -281,7 +301,7 @@ class NotchUserDriver: NSObject, SPUUserDriver {
 
     func showResumableUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
         // Resumable update - treat same as regular update found
-        showUpdateFound(with: appcastItem, state: state, reply: reply)
+        self.showUpdateFound(with: appcastItem, state: state, reply: reply)
     }
 
     func showInformationalUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {

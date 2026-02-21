@@ -9,12 +9,16 @@ import Foundation
 
 /// Controller for tmux operations
 actor TmuxController {
-    static let shared = TmuxController()
+    // MARK: Lifecycle
 
     private init() {}
 
-    func findTmuxTarget(forClaudePid pid: Int) async -> TmuxTarget? {
-        await TmuxTargetFinder.shared.findTarget(forClaudePid: pid)
+    // MARK: Internal
+
+    static let shared = TmuxController()
+
+    func findTmuxTarget(forClaudePID pid: Int) async -> TmuxTarget? {
+        await TmuxTargetFinder.shared.findTarget(forClaudePID: pid)
     }
 
     func findTmuxTarget(forWorkingDirectory dir: String) async -> TmuxTarget? {
@@ -44,11 +48,11 @@ actor TmuxController {
 
         do {
             _ = try await ProcessExecutor.shared.run(tmuxPath, arguments: [
-                "select-window", "-t", "\(target.session):\(target.window)"
+                "select-window", "-t", "\(target.session):\(target.window)",
             ])
 
             _ = try await ProcessExecutor.shared.run(tmuxPath, arguments: [
-                "select-pane", "-t", target.targetString
+                "select-pane", "-t", target.targetString,
             ])
 
             return true
