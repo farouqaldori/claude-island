@@ -45,6 +45,8 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
+    /// Set by NotchView — prevents auto-dismiss when permissions need attention
+    @Published var hasPendingPermissions: Bool = false
 
     // MARK: - Dependencies
 
@@ -185,9 +187,14 @@ class NotchViewModel: ObservableObject {
         switch status {
         case .opened:
             if geometry.isPointOutsidePanel(location, size: openedSize) {
-                notchClose()
-                // Re-post the click so it reaches the window/app behind us
-                repostClickAt(location)
+                // Stay open if there are pending permissions and the terminal isn't visible
+                if hasPendingPermissions && !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+                    // Re-post the click but keep the island open
+                    repostClickAt(location)
+                } else {
+                    notchClose()
+                    repostClickAt(location)
+                }
             } else if geometry.notchScreenRect.contains(location) {
                 // Clicking notch while opened - only close if NOT in chat mode
                 if !isInChatMode {

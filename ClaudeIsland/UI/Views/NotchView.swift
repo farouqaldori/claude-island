@@ -215,6 +215,7 @@ struct NotchView: View {
             handleStatusChange(from: oldStatus, to: newStatus)
         }
         .onChange(of: sessionMonitor.pendingInstances) { _, sessions in
+            viewModel.hasPendingPermissions = sessions.contains { $0.phase.isWaitingForApproval }
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
