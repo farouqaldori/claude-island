@@ -205,7 +205,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
-            KeyboardShortcutHandler.shared.start(sessionMonitor: sessionMonitor)
+            KeyboardShortcutHandler.shared.start(sessionMonitor: sessionMonitor, viewModel: viewModel)
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -216,6 +216,18 @@ struct NotchView: View {
         }
         .onChange(of: sessionMonitor.pendingInstances) { _, sessions in
             viewModel.hasPendingPermissions = sessions.contains { $0.phase.isWaitingForApproval }
+
+            // Keep keyboard selection in sync with pending list
+            let approvalIds = sessions
+                .filter { $0.phase.isWaitingForApproval }
+                .sorted { a, b in
+                    let dateA = a.lastUserMessageDate ?? a.lastActivity
+                    let dateB = b.lastUserMessageDate ?? b.lastActivity
+                    return dateA > dateB
+                }
+                .map { $0.sessionId }
+            viewModel.reconcilePendingSelection(pendingSessionIds: approvalIds)
+
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
@@ -272,8 +284,17 @@ struct NotchView: View {
 
                     // Permission indicator only (amber) - waiting for input shows checkmark on right
                     if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
-                            .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+                        HStack(spacing: 2) {
+                            PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                                .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+
+                            let pendingCount = sessionMonitor.instances.filter { $0.phase.isWaitingForApproval }.count
+                            if pendingCount > 1 {
+                                Text("\(pendingCount)")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundColor(TerminalColors.amber)
+                            }
+                        }
                     }
                 }
                 .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))

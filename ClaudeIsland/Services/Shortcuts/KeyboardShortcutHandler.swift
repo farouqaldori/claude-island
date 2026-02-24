@@ -10,43 +10,11 @@
 import AppKit
 import Carbon.HIToolbox
 
-// Unique IDs for our two hotkeys
+// Unique IDs for our hotkeys
 private let kApproveHotKeyID: UInt32 = 1
 private let kDenyHotKeyID: UInt32 = 2
-
-// Global C callback — Carbon hotkey events land here
-private func hotKeyHandler(
-    nextHandler: EventHandlerCallRef?,
-    event: EventRef?,
-    userData: UnsafeMutableRawPointer?
-) -> OSStatus {
-    guard let event else { return OSStatus(eventNotHandledErr) }
-
-    var hotKeyID = EventHotKeyID()
-    let status = GetEventParameter(
-        event,
-        EventParamName(kEventParamDirectObject),
-        EventParamType(typeEventHotKeyID),
-        nil,
-        MemoryLayout<EventHotKeyID>.size,
-        nil,
-        &hotKeyID
-    )
-    guard status == noErr else { return status }
-
-    Task { @MainActor in
-        switch hotKeyID.id {
-        case kApproveHotKeyID:
-            KeyboardShortcutHandler.shared.handleApprove()
-        case kDenyHotKeyID:
-            KeyboardShortcutHandler.shared.handleDeny()
-        default:
-            break
-        }
-    }
-
-    return noErr
-}
+private let kCycleNextHotKeyID: UInt32 = 3
+private let kCyclePrevHotKeyID: UInt32 = 4
 
 @MainActor
 class KeyboardShortcutHandler {
@@ -54,15 +22,19 @@ class KeyboardShortcutHandler {
 
     private var approveHotKeyRef: EventHotKeyRef?
     private var denyHotKeyRef: EventHotKeyRef?
+    private var cycleNextHotKeyRef: EventHotKeyRef?
+    private var cyclePrevHotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
     private var sessionMonitor: ClaudeSessionMonitor?
+    private var viewModel: NotchViewModel?
 
     private init() {}
 
     // MARK: - Public API
 
-    func start(sessionMonitor: ClaudeSessionMonitor) {
+    func start(sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
         self.sessionMonitor = sessionMonitor
+        self.viewModel = viewModel
         if AppSettings.shortcutsEnabled {
             registerHotKeys()
         }
@@ -71,6 +43,7 @@ class KeyboardShortcutHandler {
     func stop() {
         unregisterHotKeys()
         sessionMonitor = nil
+        viewModel = nil
     }
 
     /// Re-register hotkeys after settings change
@@ -86,7 +59,8 @@ class KeyboardShortcutHandler {
     private func registerHotKeys() {
         unregisterHotKeys()
 
-        // Install the event handler (once)
+        // Install the event handler with a literal closure
+        // (Swift requires a literal closure to form a C function pointer)
         var eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -94,7 +68,38 @@ class KeyboardShortcutHandler {
 
         InstallEventHandler(
             GetApplicationEventTarget(),
-            hotKeyHandler,
+            { (_: EventHandlerCallRef?, event: EventRef?, _: UnsafeMutableRawPointer?) -> OSStatus in
+                guard let event else { return OSStatus(eventNotHandledErr) }
+
+                var hotKeyID = EventHotKeyID()
+                let status = GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+                guard status == noErr else { return status }
+
+                Task { @MainActor in
+                    switch hotKeyID.id {
+                    case kApproveHotKeyID:
+                        KeyboardShortcutHandler.shared.handleApprove()
+                    case kDenyHotKeyID:
+                        KeyboardShortcutHandler.shared.handleDeny()
+                    case kCycleNextHotKeyID:
+                        KeyboardShortcutHandler.shared.handleCycleNext()
+                    case kCyclePrevHotKeyID:
+                        KeyboardShortcutHandler.shared.handleCyclePrev()
+                    default:
+                        break
+                    }
+                }
+
+                return noErr
+            },
             1,
             &eventType,
             nil,
@@ -124,6 +129,28 @@ class KeyboardShortcutHandler {
             0,
             &denyHotKeyRef
         )
+
+        // Register cycle-next hotkey (⌘⇧↓)
+        var cycleNextID = EventHotKeyID(signature: fourCharCode("CISL"), id: kCycleNextHotKeyID)
+        RegisterEventHotKey(
+            UInt32(kVK_DownArrow),
+            carbonModifiers(from: [.command, .shift]),
+            cycleNextID,
+            GetApplicationEventTarget(),
+            0,
+            &cycleNextHotKeyRef
+        )
+
+        // Register cycle-prev hotkey (⌘⇧↑)
+        var cyclePrevID = EventHotKeyID(signature: fourCharCode("CISL"), id: kCyclePrevHotKeyID)
+        RegisterEventHotKey(
+            UInt32(kVK_UpArrow),
+            carbonModifiers(from: [.command, .shift]),
+            cyclePrevID,
+            GetApplicationEventTarget(),
+            0,
+            &cyclePrevHotKeyRef
+        )
     }
 
     private func unregisterHotKeys() {
@@ -134,6 +161,14 @@ class KeyboardShortcutHandler {
         if let ref = denyHotKeyRef {
             UnregisterEventHotKey(ref)
             denyHotKeyRef = nil
+        }
+        if let ref = cycleNextHotKeyRef {
+            UnregisterEventHotKey(ref)
+            cycleNextHotKeyRef = nil
+        }
+        if let ref = cyclePrevHotKeyRef {
+            UnregisterEventHotKey(ref)
+            cyclePrevHotKeyRef = nil
         }
         if let handler = eventHandler {
             RemoveEventHandler(handler)
@@ -146,9 +181,10 @@ class KeyboardShortcutHandler {
     func handleApprove() {
         guard AppSettings.shortcutsEnabled, let sessionMonitor else { return }
 
-        guard let pendingSession = sessionMonitor.pendingInstances.first(where: { $0.phase.isWaitingForApproval }) else {
-            return
-        }
+        let targetId = viewModel?.selectedPendingSessionId
+        guard let pendingSession = sessionMonitor.pendingInstances.first(where: {
+            $0.phase.isWaitingForApproval && (targetId == nil || $0.sessionId == targetId)
+        }) else { return }
 
         sessionMonitor.approvePermission(sessionId: pendingSession.sessionId)
         ShortcutFeedback.flash(.approve)
@@ -157,15 +193,39 @@ class KeyboardShortcutHandler {
     func handleDeny() {
         guard AppSettings.shortcutsEnabled, let sessionMonitor else { return }
 
-        guard let pendingSession = sessionMonitor.pendingInstances.first(where: { $0.phase.isWaitingForApproval }) else {
-            return
-        }
+        let targetId = viewModel?.selectedPendingSessionId
+        guard let pendingSession = sessionMonitor.pendingInstances.first(where: {
+            $0.phase.isWaitingForApproval && (targetId == nil || $0.sessionId == targetId)
+        }) else { return }
 
         sessionMonitor.denyPermission(sessionId: pendingSession.sessionId, reason: "Denied via keyboard shortcut")
         ShortcutFeedback.flash(.deny)
     }
 
+    func handleCycleNext() {
+        guard AppSettings.shortcutsEnabled, let viewModel else { return }
+        viewModel.cyclePendingSelection(direction: 1, pendingSessionIds: sortedApprovalSessionIds())
+    }
+
+    func handleCyclePrev() {
+        guard AppSettings.shortcutsEnabled, let viewModel else { return }
+        viewModel.cyclePendingSelection(direction: -1, pendingSessionIds: sortedApprovalSessionIds())
+    }
+
     // MARK: - Helpers
+
+    /// Sorted approval session IDs matching the visual order in ClaudeInstancesView
+    private func sortedApprovalSessionIds() -> [String] {
+        guard let sessionMonitor else { return [] }
+        return sessionMonitor.pendingInstances
+            .filter { $0.phase.isWaitingForApproval }
+            .sorted { a, b in
+                let dateA = a.lastUserMessageDate ?? a.lastActivity
+                let dateB = b.lastUserMessageDate ?? b.lastActivity
+                return dateA > dateB
+            }
+            .map { $0.sessionId }
+    }
 
     /// Convert NSEvent.ModifierFlags to Carbon modifier mask
     private func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {

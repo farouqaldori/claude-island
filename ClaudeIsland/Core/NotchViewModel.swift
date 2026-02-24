@@ -47,6 +47,8 @@ class NotchViewModel: ObservableObject {
     @Published var isHovering: Bool = false
     /// Set by NotchView — prevents auto-dismiss when permissions need attention
     @Published var hasPendingPermissions: Bool = false
+    /// The session ID currently targeted by keyboard shortcuts
+    @Published var selectedPendingSessionId: String?
 
     // MARK: - Dependencies
 
@@ -91,6 +93,33 @@ class NotchViewModel: ObservableObject {
                 height: min(max(contentHeight, 120), 400)
             )
         }
+    }
+
+    // MARK: - Pending Selection
+
+    /// Keep selection in sync when pending sessions change.
+    /// Auto-selects first if current selection is no longer valid.
+    func reconcilePendingSelection(pendingSessionIds: [String]) {
+        if pendingSessionIds.isEmpty {
+            selectedPendingSessionId = nil
+            return
+        }
+        if let selected = selectedPendingSessionId, pendingSessionIds.contains(selected) {
+            return
+        }
+        selectedPendingSessionId = pendingSessionIds.first
+    }
+
+    /// Cycle selection through pending sessions. direction: +1 = next, -1 = prev.
+    func cyclePendingSelection(direction: Int, pendingSessionIds: [String]) {
+        guard pendingSessionIds.count > 1 else { return }
+        guard let current = selectedPendingSessionId,
+              let currentIndex = pendingSessionIds.firstIndex(of: current) else {
+            selectedPendingSessionId = pendingSessionIds.first
+            return
+        }
+        let nextIndex = (currentIndex + direction + pendingSessionIds.count) % pendingSessionIds.count
+        selectedPendingSessionId = pendingSessionIds[nextIndex]
     }
 
     // MARK: - Animation
