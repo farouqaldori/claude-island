@@ -19,7 +19,6 @@ struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
     @StateObject private var sessionMonitor = ClaudeSessionMonitor()
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
-    @StateObject private var shortcutFeedback = ShortcutFeedback.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
@@ -184,20 +183,6 @@ struct NotchView: View {
                             viewModel.notchOpen(reason: .click)
                         }
                     }
-            }
-        }
-        .overlay(alignment: .top) {
-            // Flash overlay when keyboard shortcut fires
-            if let flash = shortcutFeedback.activeFlash {
-                RoundedRectangle(cornerRadius: bottomCornerRadius)
-                    .fill(flash == .approve ? TerminalColors.green.opacity(0.3) : Color.red.opacity(0.3))
-                    .frame(
-                        width: closedContentWidth + 20,
-                        height: closedNotchSize.height + 4
-                    )
-                    .transition(.opacity)
-                    .animation(.easeOut(duration: 0.3), value: shortcutFeedback.activeFlash == nil)
-                    .allowsHitTesting(false)
             }
         }
         .opacity(isVisible ? 1 : 0)
