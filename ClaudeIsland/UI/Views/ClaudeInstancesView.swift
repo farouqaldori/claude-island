@@ -71,6 +71,7 @@ struct ClaudeInstancesView: View {
                 ForEach(sortedInstances) { session in
                     InstanceRow(
                         session: session,
+                        isSelected: session.sessionId == viewModel.selectedPendingSessionId,
                         onFocus: { focusSession(session) },
                         onChat: { openChat(session) },
                         onArchive: { archiveSession(session) },
@@ -120,6 +121,7 @@ struct ClaudeInstancesView: View {
 
 struct InstanceRow: View {
     let session: SessionState
+    let isSelected: Bool
     let onFocus: () -> Void
     let onChat: () -> Void
     let onArchive: () -> Void
@@ -286,6 +288,16 @@ struct InstanceRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
         )
+        .overlay(alignment: .leading) {
+            if isSelected && isWaitingForApproval {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(TerminalColors.amber)
+                    .frame(width: 3, height: 28)
+                    .padding(.leading, 2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.5, anchor: .leading)))
+            }
+        }
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
         .onHover { isHovered = $0 }
         .task {
             isYabaiAvailable = await WindowFinder.shared.isYabaiAvailable()

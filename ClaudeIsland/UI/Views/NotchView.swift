@@ -190,6 +190,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
+            KeyboardShortcutHandler.shared.start(sessionMonitor: sessionMonitor, viewModel: viewModel)
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -199,9 +200,23 @@ struct NotchView: View {
             handleStatusChange(from: oldStatus, to: newStatus)
         }
         .onChange(of: sessionMonitor.pendingInstances) { _, sessions in
+            viewModel.hasPendingPermissions = sessions.contains { $0.phase.isWaitingForApproval }
+
+            // Keep keyboard selection in sync with pending list
+            let approvalIds = sessions
+                .filter { $0.phase.isWaitingForApproval }
+                .sorted { a, b in
+                    let dateA = a.lastUserMessageDate ?? a.lastActivity
+                    let dateB = b.lastUserMessageDate ?? b.lastActivity
+                    return dateA > dateB
+                }
+                .map { $0.sessionId }
+            viewModel.reconcilePendingSelection(pendingSessionIds: approvalIds)
+
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
+            viewModel.instanceCount = instances.count
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
@@ -254,8 +269,17 @@ struct NotchView: View {
 
                     // Permission indicator only (amber) - waiting for input shows checkmark on right
                     if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
-                            .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+                        HStack(spacing: 2) {
+                            PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                                .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+
+                            let pendingCount = sessionMonitor.instances.filter { $0.phase.isWaitingForApproval }.count
+                            if pendingCount > 1 {
+                                Text("\(pendingCount)")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundColor(TerminalColors.amber)
+                            }
+                        }
                     }
                 }
                 .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
@@ -419,10 +443,23 @@ struct NotchView: View {
         let currentIds = Set(sessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+        if !newPendingIds.isEmpty && viewModel.status == .closed {
+            // Always expand for permission requests — the user needs to see
+            // what tool is requesting approval, even if a terminal is visible
             viewModel.notchOpen(reason: .notification)
+        }
+
+        // Auto-close when all pending permissions are resolved
+        if currentIds.isEmpty && !previousPendingIds.isEmpty && viewModel.status == .opened {
+            // Quick retract for keyboard shortcut approvals (notification-opened)
+            let delay: TimeInterval = viewModel.openReason == .notification ? 0.8 : 5.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+                if viewModel.status == .opened && !hasPendingPermission {
+                    if case .instances = viewModel.contentType {
+                        viewModel.notchClose()
+                    }
+                }
+            }
         }
 
         previousPendingIds = currentIds
@@ -467,9 +504,20 @@ struct NotchView: View {
             // Trigger bounce animation to get user's attention
             DispatchQueue.main.async {
                 isBouncing = true
-                // Bounce back after a short delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     isBouncing = false
+                }
+            }
+
+            // Auto-retract after 5s if the island is open showing a completion
+            // (no pending permissions — just a "done" state)
+            if viewModel.status == .opened && !hasPendingPermission {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [self] in
+                    if viewModel.status == .opened && !hasPendingPermission {
+                        if case .instances = viewModel.contentType {
+                            viewModel.notchClose()
+                        }
+                    }
                 }
             }
 
