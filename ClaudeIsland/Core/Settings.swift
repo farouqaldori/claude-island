@@ -38,6 +38,9 @@ enum AppSettings {
 
     private enum Keys {
         static let notificationSound = "notificationSound"
+        static let approveShortcut = "approveShortcut"
+        static let denyShortcut = "denyShortcut"
+        static let shortcutsEnabled = "shortcutsEnabled"
     }
 
     // MARK: - Notification Sound
@@ -53,6 +56,54 @@ enum AppSettings {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Keys.notificationSound)
+        }
+    }
+
+    // MARK: - Keyboard Shortcuts
+
+    /// Whether global keyboard shortcuts are enabled
+    static var shortcutsEnabled: Bool {
+        get {
+            // Default to true if never set
+            if defaults.object(forKey: Keys.shortcutsEnabled) == nil {
+                return true
+            }
+            return defaults.bool(forKey: Keys.shortcutsEnabled)
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.shortcutsEnabled)
+        }
+    }
+
+    /// Keyboard shortcut for approving permissions (default: ⌘⇧Y)
+    static var approveShortcut: KeyCombo {
+        get {
+            guard let data = defaults.data(forKey: Keys.approveShortcut),
+                  let combo = try? JSONDecoder().decode(KeyCombo.self, from: data) else {
+                return .defaultApprove
+            }
+            return combo
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.approveShortcut)
+            }
+        }
+    }
+
+    /// Keyboard shortcut for denying permissions (default: ⌘⇧N)
+    static var denyShortcut: KeyCombo {
+        get {
+            guard let data = defaults.data(forKey: Keys.denyShortcut),
+                  let combo = try? JSONDecoder().decode(KeyCombo.self, from: data) else {
+                return .defaultDeny
+            }
+            return combo
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Keys.denyShortcut)
+            }
         }
     }
 }
