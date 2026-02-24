@@ -187,7 +187,6 @@ class KeyboardShortcutHandler {
         }) else { return }
 
         sessionMonitor.approvePermission(sessionId: pendingSession.sessionId)
-        ShortcutFeedback.flash(.approve)
     }
 
     func handleDeny() {
@@ -199,7 +198,6 @@ class KeyboardShortcutHandler {
         }) else { return }
 
         sessionMonitor.denyPermission(sessionId: pendingSession.sessionId, reason: "Denied via keyboard shortcut")
-        ShortcutFeedback.flash(.deny)
     }
 
     func handleCycleNext() {

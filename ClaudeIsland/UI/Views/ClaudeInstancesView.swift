@@ -128,7 +128,6 @@ struct InstanceRow: View {
     let onApprove: () -> Void
     let onReject: () -> Void
 
-    @ObservedObject private var shortcutFeedback = ShortcutFeedback.shared
     @State private var isHovered = false
     @State private var spinnerPhase = 0
     @State private var isYabaiAvailable = false
@@ -298,16 +297,6 @@ struct InstanceRow: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.5, anchor: .leading)))
             }
         }
-        .overlay {
-            // Flash on this row when a shortcut fires and this row is selected
-            if isSelected, let flash = shortcutFeedback.activeFlash {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(flash == .approve ? TerminalColors.green.opacity(0.25) : Color.red.opacity(0.25))
-                    .transition(.opacity)
-                    .allowsHitTesting(false)
-            }
-        }
-        .animation(.easeOut(duration: 0.3), value: shortcutFeedback.activeFlash == nil)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isSelected)
         .onHover { isHovered = $0 }
         .task {
