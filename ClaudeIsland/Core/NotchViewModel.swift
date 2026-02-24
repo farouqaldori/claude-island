@@ -187,9 +187,9 @@ class NotchViewModel: ObservableObject {
         switch status {
         case .opened:
             if geometry.isPointOutsidePanel(location, size: openedSize) {
-                // Stay open if there are pending permissions and the terminal isn't visible
-                if hasPendingPermissions && !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
-                    // Re-post the click but keep the island open
+                // Stay open if there are pending permissions — the user
+                // needs to approve/deny before the island can dismiss
+                if hasPendingPermissions {
                     repostClickAt(location)
                 } else {
                     notchClose()
