@@ -444,13 +444,14 @@ struct NotchView: View {
         }
 
         // Auto-close when all pending permissions are resolved
-        // (e.g. after keyboard shortcut approval/denial)
-        if currentIds.isEmpty && !previousPendingIds.isEmpty &&
-           viewModel.status == .opened && viewModel.openReason == .notification {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in
-                // Only close if still opened via notification and no new pending items
-                if viewModel.status == .opened && viewModel.openReason == .notification && !hasPendingPermission {
-                    viewModel.notchClose()
+        if currentIds.isEmpty && !previousPendingIds.isEmpty && viewModel.status == .opened {
+            // Quick retract for keyboard shortcut approvals (notification-opened)
+            let delay: TimeInterval = viewModel.openReason == .notification ? 0.8 : 5.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [self] in
+                if viewModel.status == .opened && !hasPendingPermission {
+                    if case .instances = viewModel.contentType {
+                        viewModel.notchClose()
+                    }
                 }
             }
         }
