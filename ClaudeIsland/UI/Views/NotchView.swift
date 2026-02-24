@@ -498,9 +498,20 @@ struct NotchView: View {
             // Trigger bounce animation to get user's attention
             DispatchQueue.main.async {
                 isBouncing = true
-                // Bounce back after a short delay
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     isBouncing = false
+                }
+            }
+
+            // Auto-retract after 5s if the island is open showing a completion
+            // (no pending permissions — just a "done" state)
+            if viewModel.status == .opened && !hasPendingPermission {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [self] in
+                    if viewModel.status == .opened && !hasPendingPermission {
+                        if case .instances = viewModel.contentType {
+                            viewModel.notchClose()
+                        }
+                    }
                 }
             }
 
