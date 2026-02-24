@@ -61,6 +61,9 @@ class NotchViewModel: ObservableObject {
     var screenRect: CGRect { geometry.screenRect }
     var windowHeight: CGFloat { geometry.windowHeight }
 
+    /// Number of instances, set externally by NotchView to drive dynamic sizing
+    @Published var instanceCount: Int = 0
+
     /// Dynamic opened size based on content type
     var openedSize: CGSize {
         switch contentType {
@@ -77,9 +80,13 @@ class NotchViewModel: ObservableObject {
                 height: 420 + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
             )
         case .instances:
+            // Dynamic height: ~52pt per row + 60pt for header/padding, clamped
+            let rowHeight: CGFloat = 52
+            let chrome: CGFloat = 60
+            let contentHeight = CGFloat(max(instanceCount, 1)) * rowHeight + chrome
             return CGSize(
                 width: min(screenRect.width * 0.4, 480),
-                height: 320
+                height: min(max(contentHeight, 120), 400)
             )
         }
     }

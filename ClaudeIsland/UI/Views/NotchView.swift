@@ -218,6 +218,7 @@ struct NotchView: View {
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
+            viewModel.instanceCount = instances.count
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
@@ -439,6 +440,18 @@ struct NotchView: View {
             // Always expand for permission requests — the user needs to see
             // what tool is requesting approval, even if a terminal is visible
             viewModel.notchOpen(reason: .notification)
+        }
+
+        // Auto-close when all pending permissions are resolved
+        // (e.g. after keyboard shortcut approval/denial)
+        if currentIds.isEmpty && !previousPendingIds.isEmpty &&
+           viewModel.status == .opened && viewModel.openReason == .notification {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in
+                // Only close if still opened via notification and no new pending items
+                if viewModel.status == .opened && viewModel.openReason == .notification && !hasPendingPermission {
+                    viewModel.notchClose()
+                }
+            }
         }
 
         previousPendingIds = currentIds
