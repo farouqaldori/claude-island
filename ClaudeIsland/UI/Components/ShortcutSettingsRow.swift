@@ -66,8 +66,8 @@ struct ShortcutSettingsRow: View {
                     Button {
                         shortcutsEnabled.toggle()
                         AppSettings.shortcutsEnabled = shortcutsEnabled
+                        KeyboardShortcutHandler.shared.reloadShortcuts()
                         if shortcutsEnabled {
-                            // Re-read current combos
                             approveCombo = AppSettings.approveShortcut
                             denyCombo = AppSettings.denyShortcut
                         }
@@ -114,6 +114,7 @@ struct ShortcutSettingsRow: View {
                             AppSettings.approveShortcut = .defaultApprove
                             AppSettings.denyShortcut = .defaultDeny
                             recording = nil
+                            KeyboardShortcutHandler.shared.reloadShortcuts()
                         } label: {
                             Text("Reset to Defaults")
                                 .font(.system(size: 11))
@@ -141,6 +142,7 @@ struct ShortcutSettingsRow: View {
                         AppSettings.denyShortcut = combo
                     }
                     recording = nil
+                    KeyboardShortcutHandler.shared.reloadShortcuts()
                 }
             }
             .frame(width: 0, height: 0)

@@ -205,9 +205,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
-            if AppSettings.shortcutsEnabled {
-                KeyboardShortcutHandler.shared.start(sessionMonitor: sessionMonitor)
-            }
+            KeyboardShortcutHandler.shared.start(sessionMonitor: sessionMonitor)
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -437,9 +435,9 @@ struct NotchView: View {
         let currentIds = Set(sessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+        if !newPendingIds.isEmpty && viewModel.status == .closed {
+            // Always expand for permission requests — the user needs to see
+            // what tool is requesting approval, even if a terminal is visible
             viewModel.notchOpen(reason: .notification)
         }
 
