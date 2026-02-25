@@ -33,6 +33,9 @@ Pods/
 *.iml
 .vscode/
 
+# Local build configuration (signing overrides)
+Local.xcconfig
+
 # Sparkle signing keys (NEVER commit these!)
 .sparkle-keys/
 

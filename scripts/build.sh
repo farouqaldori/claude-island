@@ -17,6 +17,14 @@ mkdir -p "$BUILD_DIR"
 
 cd "$PROJECT_DIR"
 
+# Use Local.xcconfig for signing overrides if it exists
+XCCONFIG_FLAG=""
+if [ -f "$PROJECT_DIR/Local.xcconfig" ]; then
+    XCCONFIG_FLAG="-xcconfig $PROJECT_DIR/Local.xcconfig"
+    echo "Using Local.xcconfig for signing configuration"
+    echo ""
+fi
+
 # Build and archive
 echo "Archiving..."
 xcodebuild archive \
@@ -24,15 +32,15 @@ xcodebuild archive \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
     -destination "generic/platform=macOS" \
+    $XCCONFIG_FLAG \
     ENABLE_HARDENED_RUNTIME=YES \
-    CODE_SIGN_STYLE=Automatic \
     | xcpretty || xcodebuild archive \
     -scheme ClaudeIsland \
     -configuration Release \
     -archivePath "$ARCHIVE_PATH" \
     -destination "generic/platform=macOS" \
-    ENABLE_HARDENED_RUNTIME=YES \
-    CODE_SIGN_STYLE=Automatic
+    $XCCONFIG_FLAG \
+    ENABLE_HARDENED_RUNTIME=YES
 
 # Create ExportOptions.plist if it doesn't exist
 EXPORT_OPTIONS="$BUILD_DIR/ExportOptions.plist"
