@@ -67,7 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Mixpanel.mainInstance().track(event: "App Launched")
         Mixpanel.mainInstance().flush()
 
-        HookInstaller.installIfNeeded()
+        installHooksWithConsent()
         NSApplication.shared.setActivationPolicy(.accessory)
 
         windowManager = WindowManager()
@@ -89,6 +89,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleScreenChange() {
         _ = windowManager?.setupNotchWindow()
+    }
+
+    private func installHooksWithConsent() {
+        let consent = AppSettings.hooksConsentGiven
+
+        if consent == true {
+            HookInstaller.installIfNeeded()
+            return
+        }
+
+        if consent == false {
+            return
+        }
+
+        // consent == nil: first launch, never asked
+        // Existing users with hooks already installed get implied consent
+        if HookInstaller.isInstalled() {
+            AppSettings.hooksConsentGiven = true
+            HookInstaller.installIfNeeded()
+            return
+        }
+
+        // New user: show consent dialog
+        let alert = NSAlert()
+        alert.messageText = "Enable Claude Code Integration?"
+        alert.informativeText = "Claude Island can integrate with Claude Code by installing hooks into your ~/.claude/settings.json configuration. This enables real-time status monitoring and permission management from the menu bar.\n\nYou can change this later in Settings."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Enable Hooks")
+        alert.addButton(withTitle: "Not Now")
+
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            AppSettings.hooksConsentGiven = true
+            HookInstaller.installIfNeeded()
+        } else {
+            AppSettings.hooksConsentGiven = false
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

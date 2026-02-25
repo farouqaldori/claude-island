@@ -9,8 +9,18 @@ import os
 import socket
 import sys
 
-SOCKET_PATH = "/tmp/claude-island.sock"
+SOCKET_PATH = os.path.expanduser("~/.claude/claude-island.sock")
+TOKEN_PATH = os.path.expanduser("~/.claude/hooks/.claude-island-token")
 TIMEOUT_SECONDS = 300  # 5 minutes for permission decisions
+
+
+def get_token():
+    """Read the authentication token written by ClaudeIsland.app"""
+    try:
+        with open(TOKEN_PATH, "r") as f:
+            return f.read().strip()
+    except (OSError, IOError):
+        return None
 
 
 def get_tty():
@@ -94,6 +104,11 @@ def main():
         "pid": claude_pid,
         "tty": tty,
     }
+
+    # Add authentication token
+    token = get_token()
+    if token:
+        state["token"] = token
 
     # Map events to status
     if event == "UserPromptSubmit":
