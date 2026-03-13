@@ -70,6 +70,17 @@ enum SessionEvent: Sendable {
     /// Session has ended
     case sessionEnded(sessionId: String)
 
+    // MARK: - Remote Session Discovery
+
+    /// Remote sessions discovered via API — replaces the full set each poll
+    case remoteSessionsUpdated([RemoteSessionScanner.DiscoveredSession])
+
+    /// Remote session history loaded from API
+    case remoteHistoryLoaded(sessionId: String, events: [RemoteSessionScanner.RemoteEvent])
+
+    /// Rename a session (updates locally and syncs to cloud)
+    case renameSession(sessionId: String, newTitle: String)
+
     /// Request to load initial history from file
     case loadHistory(sessionId: String, cwd: String)
 
@@ -215,6 +226,12 @@ extension SessionEvent: CustomStringConvertible {
             return "subagentStopped(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)))"
         case .agentFileUpdated(let sessionId, let taskToolId, let tools):
             return "agentFileUpdated(session: \(sessionId.prefix(8)), task: \(taskToolId.prefix(12)), tools: \(tools.count))"
+        case .remoteSessionsUpdated(let sessions):
+            return "remoteSessionsUpdated(count: \(sessions.count))"
+        case .remoteHistoryLoaded(let sessionId, let events):
+            return "remoteHistoryLoaded(session: \(sessionId.prefix(8)), events: \(events.count))"
+        case .renameSession(let sessionId, let newTitle):
+            return "renameSession(session: \(sessionId.prefix(8)), title: \(newTitle.prefix(20)))"
         }
     }
 }

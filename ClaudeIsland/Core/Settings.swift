@@ -38,6 +38,9 @@ enum AppSettings {
 
     private enum Keys {
         static let notificationSound = "notificationSound"
+        static let readAloudEnabled = "readAloudEnabled"
+        static let selectedVoiceId = "selectedVoiceId"
+        static let useAnthropicSTT = "useAnthropicSTT"
     }
 
     // MARK: - Notification Sound
@@ -54,5 +57,25 @@ enum AppSettings {
         set {
             defaults.set(newValue.rawValue, forKey: Keys.notificationSound)
         }
+    }
+
+    // MARK: - Read Aloud (TTS)
+
+    /// Whether to read assistant responses aloud when Claude finishes
+    static var readAloudEnabled: Bool {
+        get { defaults.bool(forKey: Keys.readAloudEnabled) }
+        set { defaults.set(newValue, forKey: Keys.readAloudEnabled) }
+    }
+
+    /// The selected voice identifier for TTS
+    static var selectedVoiceId: String? {
+        get { defaults.string(forKey: Keys.selectedVoiceId) }
+        set { defaults.set(newValue, forKey: Keys.selectedVoiceId) }
+    }
+
+    /// Use Anthropic's cloud STT instead of Apple's on-device speech recognition
+    static var useAnthropicSTT: Bool {
+        get { defaults.bool(forKey: Keys.useAnthropicSTT) }
+        set { defaults.set(newValue, forKey: Keys.useAnthropicSTT) }
     }
 }

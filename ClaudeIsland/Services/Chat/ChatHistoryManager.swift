@@ -80,7 +80,11 @@ class ChatHistoryManager: ObservableObject {
             let filteredItems = filterOutSubagentTools(session.chatItems)
             newHistories[session.sessionId] = filteredItems
             newAgentDescriptions[session.sessionId] = session.subagentState.agentDescriptions
-            loadedSessions.insert(session.sessionId)
+            // Only mark as loaded if it has content (remote sessions start empty
+            // and need to fetch history from API on first chat open)
+            if !session.chatItems.isEmpty {
+                loadedSessions.insert(session.sessionId)
+            }
         }
         histories = newHistories
         agentDescriptions = newAgentDescriptions

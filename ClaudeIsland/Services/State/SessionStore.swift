@@ -27,6 +27,9 @@ actor SessionStore {
     /// Pending file syncs (debounced)
     private var pendingSyncs: [String: Task<Void, Never>] = [:]
 
+    /// Session IDs that were manually archived (prevents re-discovery by scanner)
+    private var archivedSessionIds: Set<String> = []
+
     /// Sync debounce interval (100ms)
     private let syncDebounceNs: UInt64 = 100_000_000
 
@@ -108,6 +111,15 @@ actor SessionStore {
         case .agentFileUpdated:
             // No longer used - subagent tools are populated from JSONL completion
             break
+
+        case .remoteSessionsUpdated(let remoteSessions):
+            processRemoteSessionsUpdated(remoteSessions)
+
+        case .remoteHistoryLoaded(let sessionId, let events):
+            processRemoteHistoryLoaded(sessionId: sessionId, events: events)
+
+        case .renameSession(let sessionId, let newTitle):
+            processRenameSession(sessionId: sessionId, newTitle: newTitle)
         }
 
         publishState()
@@ -126,14 +138,15 @@ actor SessionStore {
         }
 
         session.pid = event.pid
-        if let pid = event.pid {
-            let tree = ProcessTreeBuilder.shared.buildTree()
-            session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
-        }
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
         session.lastActivity = Date()
+
+        // Register local cloud session to prevent duplicate remote entries
+        if isNewSession {
+            registerLocalCloudSessionIfNeeded(cwd: event.cwd)
+        }
 
         if event.status == "ended" {
             sessions.removeValue(forKey: sessionId)
@@ -176,7 +189,7 @@ actor SessionStore {
             projectName: URL(fileURLWithPath: event.cwd).lastPathComponent,
             pid: event.pid,
             tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
-            isInTmux: false,  // Will be updated
+            canSendMessages: true,
             phase: .idle
         )
     }
@@ -839,16 +852,233 @@ actor SessionStore {
         Self.logger.info("/clear processed for session \(sessionId.prefix(8), privacy: .public) - marked for reconciliation")
     }
 
+    // MARK: - Remote Session Discovery
+
+    /// IDs of remote sessions currently shown (cloud session IDs prefixed with "remote-")
+    private var remoteSessionIds: Set<String> = []
+
+    /// Cloud session IDs that have a local hook session (to avoid duplicates)
+    private var localCloudSessionIds: Set<String> = []
+
+    /// Register a cloud session ID as having a local session (called when bridge-pointer is found)
+    func registerLocalCloudSession(_ cloudSessionId: String) {
+        localCloudSessionIds.insert(cloudSessionId)
+    }
+
+    /// Check bridge-pointer.json and register cloud session ID for dedup
+    private func registerLocalCloudSessionIfNeeded(cwd: String) {
+        let projectPath = cwd.replacingOccurrences(of: "/", with: "-")
+        let pointerPath = NSHomeDirectory() + "/.claude/projects/\(projectPath)/bridge-pointer.json"
+
+        guard let data = FileManager.default.contents(atPath: pointerPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cloudSessionId = json["sessionId"] as? String else {
+            return
+        }
+
+        localCloudSessionIds.insert(cloudSessionId)
+        // Also remove any existing remote entry for this cloud session
+        let remoteId = "remote-\(cloudSessionId)"
+        sessions.removeValue(forKey: remoteId)
+        remoteSessionIds.remove(remoteId)
+    }
+
+    private func processRemoteSessionsUpdated(_ remoteSessions: [RemoteSessionScanner.DiscoveredSession]) {
+        // Build set of new remote IDs
+        var newRemoteIds: Set<String> = []
+
+        for remote in remoteSessions {
+            let sessionId = "remote-\(remote.cloudSessionId)"
+            newRemoteIds.insert(sessionId)
+
+            // Skip if this cloud session has a local hook session (avoid duplicates)
+            if localCloudSessionIds.contains(remote.cloudSessionId) { continue }
+
+            // Skip if archived by user
+            if archivedSessionIds.contains(sessionId) { continue }
+
+            // Determine phase from API status
+            let phase: SessionPhase
+            switch remote.status {
+            case "running": phase = .processing
+            default: phase = .idle
+            }
+
+            if var existing = sessions[sessionId] {
+                // Update existing remote session
+                existing.phase = phase
+                existing.lastActivity = remote.updatedAt ?? Date()
+                // Sync title from cloud (picks up renames from web app)
+                existing.conversationInfo.summary = remote.title
+                sessions[sessionId] = existing
+            } else {
+                // Create new remote session
+                let displayName = remote.title
+                let session = SessionState(
+                    sessionId: sessionId,
+                    cwd: remote.repoName ?? "",
+                    projectName: displayName,
+                    canSendMessages: true,
+                    phase: phase,
+                    conversationInfo: ConversationInfo(
+                        summary: remote.title,
+                        lastMessage: nil,
+                        lastMessageRole: nil,
+                        lastToolName: nil,
+                        firstUserMessage: nil,
+                        lastUserMessageDate: nil
+                    ),
+                    lastActivity: remote.updatedAt ?? Date(),
+                    createdAt: remote.createdAt ?? Date()
+                )
+                sessions[sessionId] = session
+                Self.logger.info("Discovered remote session: \(remote.cloudSessionId.prefix(12), privacy: .public) - \(displayName, privacy: .public)")
+            }
+        }
+
+        // Remove remote sessions that are no longer running
+        let staleIds = remoteSessionIds.subtracting(newRemoteIds)
+        for staleId in staleIds {
+            sessions.removeValue(forKey: staleId)
+        }
+
+        remoteSessionIds = newRemoteIds
+    }
+
+    /// Rename a session locally and sync to cloud API
+    private func processRenameSession(sessionId: String, newTitle: String) {
+        guard var session = sessions[sessionId] else { return }
+        session.conversationInfo.summary = newTitle
+        sessions[sessionId] = session
+
+        // If remote session, sync title to cloud
+        if sessionId.hasPrefix("remote-") {
+            let cloudSessionId = String(sessionId.dropFirst("remote-".count))
+            Task {
+                do {
+                    try await AnthropicBridgeClient.shared.renameSession(cloudSessionId, title: newTitle)
+                } catch {
+                    DebugFileLogger.log("renameSession: cloud sync failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    /// Convert remote API events to chat history items
+    private func processRemoteHistoryLoaded(sessionId: String, events: [RemoteSessionScanner.RemoteEvent]) {
+        guard var session = sessions[sessionId] else { return }
+
+        // Build set of existing item IDs for deduplication
+        let existingIds = Set(session.chatItems.map(\.id))
+        var newItems: [ChatHistoryItem] = []
+
+        // Track last message info for conversationInfo update
+        var lastUserText: String?
+        var lastUserDate: Date?
+        var lastMessage: String?
+        var lastMessageRole: String?
+        var lastToolName: String?
+
+        for event in events {
+            switch event.type {
+            case .user(let text):
+                lastUserText = text
+                lastUserDate = event.timestamp
+                lastMessage = text
+                lastMessageRole = "user"
+                if !existingIds.contains(event.id) {
+                    newItems.append(ChatHistoryItem(
+                        id: event.id,
+                        type: .user(text),
+                        timestamp: event.timestamp
+                    ))
+                }
+            case .assistant(let text):
+                lastMessage = text
+                lastMessageRole = "assistant"
+                if !existingIds.contains(event.id) {
+                    newItems.append(ChatHistoryItem(
+                        id: event.id,
+                        type: .assistant(text),
+                        timestamp: event.timestamp
+                    ))
+                }
+            case .toolUse(let name, let input):
+                lastMessage = MCPToolFormatter.formatToolName(name)
+                lastMessageRole = "tool"
+                lastToolName = name
+                if !existingIds.contains(event.id) {
+                    newItems.append(ChatHistoryItem(
+                        id: event.id,
+                        type: .toolCall(ToolCallItem(
+                            name: name,
+                            input: input,
+                            status: .success,
+                            result: nil,
+                            structuredResult: nil,
+                            subagentTools: []
+                        )),
+                        timestamp: event.timestamp
+                    ))
+                }
+            case .toolResult:
+                // Results are associated with tool_use items above
+                break
+            }
+        }
+
+        // Append new items (events are already in chronological order)
+        if !newItems.isEmpty {
+            session.chatItems.append(contentsOf: newItems)
+            Self.logger.info("Added \(newItems.count) new remote history items for \(sessionId.prefix(12), privacy: .public) (total: \(session.chatItems.count))")
+        }
+
+        // Always update conversationInfo from latest events to keep instance list current
+        if let msg = lastMessage {
+            session.conversationInfo.lastMessage = msg
+        }
+        if let role = lastMessageRole {
+            session.conversationInfo.lastMessageRole = role
+        }
+        if let toolName = lastToolName {
+            session.conversationInfo.lastToolName = toolName
+        }
+        if let userText = lastUserText {
+            if session.conversationInfo.firstUserMessage == nil {
+                session.conversationInfo.firstUserMessage = userText
+            }
+        }
+        if let userDate = lastUserDate {
+            session.conversationInfo.lastUserMessageDate = userDate
+        }
+        session.lastActivity = Date()
+
+        sessions[sessionId] = session
+    }
+
     // MARK: - Session End Processing
 
     private func processSessionEnd(sessionId: String) async {
         sessions.removeValue(forKey: sessionId)
+        archivedSessionIds.insert(sessionId)
         cancelPendingSync(sessionId: sessionId)
     }
 
     // MARK: - History Loading
 
     private func loadHistoryFromFile(sessionId: String, cwd: String) async {
+        DebugFileLogger.log("loadHistoryFromFile: sessionId=\(sessionId), cwd=\(cwd)")
+        // Remote sessions load from API
+        if sessionId.hasPrefix("remote-") {
+            let cloudSessionId = String(sessionId.dropFirst("remote-".count))
+            DebugFileLogger.log("loadHistoryFromFile: loading remote events for \(cloudSessionId)")
+            let events = await RemoteSessionScanner.shared.loadEvents(cloudSessionId: cloudSessionId)
+            DebugFileLogger.log("loadHistoryFromFile: got \(events.count) events, session exists=\(sessions[sessionId] != nil)")
+            processRemoteHistoryLoaded(sessionId: sessionId, events: events)
+            publishState()
+            return
+        }
+
         // Parse file asynchronously
         let messages = await ConversationParser.shared.parseFullConversation(
             sessionId: sessionId,

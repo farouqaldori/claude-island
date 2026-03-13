@@ -18,8 +18,11 @@ struct NotchMenuView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
     @ObservedObject private var soundSelector = SoundSelector.shared
+    @ObservedObject private var loginManager = OAuthLoginManager.shared
     @State private var hooksInstalled: Bool = false
     @State private var launchAtLogin: Bool = false
+    @State private var readAloudEnabled: Bool = AppSettings.readAloudEnabled
+    @State private var useAnthropicSTT: Bool = AppSettings.useAnthropicSTT
 
     var body: some View {
         VStack(spacing: 4) {
@@ -38,6 +41,16 @@ struct NotchMenuView: View {
             // Appearance settings
             ScreenPickerRow(screenSelector: screenSelector)
             SoundPickerRow(soundSelector: soundSelector)
+            VoicePickerRow(isEnabled: $readAloudEnabled)
+
+            MenuToggleRow(
+                icon: "waveform",
+                label: "Claude Voice Input",
+                isOn: useAnthropicSTT
+            ) {
+                useAnthropicSTT.toggle()
+                AppSettings.useAnthropicSTT = useAnthropicSTT
+            }
 
             Divider()
                 .background(Color.white.opacity(0.08))
@@ -75,6 +88,8 @@ struct NotchMenuView: View {
                     hooksInstalled = true
                 }
             }
+
+            RemoteControlRow(loginManager: loginManager)
 
             AccessibilityRow(isEnabled: AXIsProcessTrusted())
 
@@ -122,7 +137,10 @@ struct NotchMenuView: View {
     private func refreshStates() {
         hooksInstalled = HookInstaller.isInstalled()
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        readAloudEnabled = AppSettings.readAloudEnabled
+        useAnthropicSTT = AppSettings.useAnthropicSTT
         screenSelector.refreshScreens()
+        loginManager.checkCredentials()
     }
 }
 
@@ -522,5 +540,133 @@ struct MenuToggleRow: View {
 
     private var textColor: Color {
         .white.opacity(isHovered ? 1.0 : 0.7)
+    }
+}
+
+// MARK: - Remote Control Row
+
+struct RemoteControlRow: View {
+    @ObservedObject var loginManager: OAuthLoginManager
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            handleTap()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(iconColor)
+                    .frame(width: 16)
+
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(textColor)
+
+                Spacer()
+
+                rightContent
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovered && isInteractive ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!isInteractive)
+        .onHover { isHovered = $0 }
+    }
+
+    private var icon: String {
+        switch loginManager.state {
+        case .loggedIn: return "checkmark.circle.fill"
+        case .loggingIn: return "arrow.triangle.2.circlepath"
+        case .loggedOut, .unknown: return "person.crop.circle"
+        case .error: return "exclamationmark.circle"
+        }
+    }
+
+    private var iconColor: Color {
+        switch loginManager.state {
+        case .loggedIn: return TerminalColors.green
+        case .loggingIn: return TerminalColors.blue
+        case .loggedOut, .unknown: return .white.opacity(isHovered ? 1.0 : 0.7)
+        case .error: return Color(red: 1.0, green: 0.4, blue: 0.4)
+        }
+    }
+
+    private var label: String {
+        switch loginManager.state {
+        case .loggedIn: return "Remote Control"
+        case .loggingIn: return "Logging in..."
+        case .loggedOut, .unknown: return "Login to Claude"
+        case .error: return "Login Failed"
+        }
+    }
+
+    private var textColor: Color {
+        switch loginManager.state {
+        case .loggedIn: return .white.opacity(isHovered ? 1.0 : 0.7)
+        case .loggingIn: return .white.opacity(0.9)
+        case .loggedOut, .unknown: return .white.opacity(isHovered ? 1.0 : 0.7)
+        case .error: return Color(red: 1.0, green: 0.4, blue: 0.4)
+        }
+    }
+
+    private var isInteractive: Bool {
+        switch loginManager.state {
+        case .loggedIn, .loggedOut, .unknown, .error: return true
+        case .loggingIn: return false
+        }
+    }
+
+    @ViewBuilder
+    private var rightContent: some View {
+        switch loginManager.state {
+        case .loggedIn:
+            Circle()
+                .fill(TerminalColors.green)
+                .frame(width: 6, height: 6)
+
+            Text("On")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.4))
+
+        case .loggingIn:
+            ProgressView()
+                .scaleEffect(0.5)
+                .frame(width: 12, height: 12)
+
+        case .loggedOut, .unknown:
+            Text("Connect")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.black)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Color.white)
+                )
+
+        case .error:
+            Text("Retry")
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.5))
+        }
+    }
+
+    private func handleTap() {
+        switch loginManager.state {
+        case .loggedOut, .unknown, .error:
+            loginManager.startLogin()
+        case .loggedIn:
+            // Already logged in - could show info or disconnect
+            break
+        case .loggingIn:
+            break
+        }
     }
 }

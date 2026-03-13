@@ -75,7 +75,8 @@ struct ClaudeInstancesView: View {
                         onChat: { openChat(session) },
                         onArchive: { archiveSession(session) },
                         onApprove: { approveSession(session) },
-                        onReject: { rejectSession(session) }
+                        onReject: { rejectSession(session) },
+                        onRename: { renameSession(session, newTitle: $0) }
                     )
                     .id(session.stableId)
                 }
@@ -88,8 +89,6 @@ struct ClaudeInstancesView: View {
     // MARK: - Actions
 
     private func focusSession(_ session: SessionState) {
-        guard session.isInTmux else { return }
-
         Task {
             if let pid = session.pid {
                 _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
@@ -111,6 +110,10 @@ struct ClaudeInstancesView: View {
         sessionMonitor.denyPermission(sessionId: session.sessionId, reason: nil)
     }
 
+    private func renameSession(_ session: SessionState, newTitle: String) {
+        sessionMonitor.renameSession(sessionId: session.sessionId, newTitle: newTitle)
+    }
+
     private func archiveSession(_ session: SessionState) {
         sessionMonitor.archiveSession(sessionId: session.sessionId)
     }
@@ -125,10 +128,13 @@ struct InstanceRow: View {
     let onArchive: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
+    let onRename: (String) -> Void
 
     @State private var isHovered = false
     @State private var spinnerPhase = 0
     @State private var isYabaiAvailable = false
+    @State private var isEditing = false
+    @State private var editText = ""
 
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
@@ -137,6 +143,11 @@ struct InstanceRow: View {
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
         session.phase.isWaitingForApproval
+    }
+
+    /// Whether this is a remote API session (not local hook)
+    private var isRemoteSession: Bool {
+        session.sessionId.hasPrefix("remote-")
     }
 
     /// Whether the pending tool requires interactive input (not just approve/deny)
@@ -153,10 +164,24 @@ struct InstanceRow: View {
 
             // Text content
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
+                if isEditing {
+                    TextField("", text: $editText, onCommit: {
+                        let trimmed = editText.trimmingCharacters(in: .whitespaces)
+                        if !trimmed.isEmpty && trimmed != session.displayTitle {
+                            onRename(trimmed)
+                        }
+                        isEditing = false
+                    })
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .textFieldStyle(.plain)
+                    .onExitCommand { isEditing = false }
+                } else {
+                    Text(session.displayTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
 
                 // Show tool call when waiting for approval, otherwise last activity
                 if isWaitingForApproval, let toolName = session.pendingToolName {
@@ -221,6 +246,11 @@ struct InstanceRow: View {
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                         .lineLimit(1)
+                } else if isRemoteSession, !session.cwd.isEmpty {
+                    Text(session.cwd)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
                 }
             }
 
@@ -237,7 +267,7 @@ struct InstanceRow: View {
                     // Go to Terminal button (only if yabai available)
                     if isYabaiAvailable {
                         TerminalButton(
-                            isEnabled: session.isInTmux,
+                            isEnabled: true,
                             onTap: { onFocus() }
                         )
                     }
@@ -252,13 +282,19 @@ struct InstanceRow: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else {
                 HStack(spacing: 8) {
+                    // Rename icon
+                    IconButton(icon: "pencil") {
+                        editText = session.displayTitle
+                        isEditing = true
+                    }
+
                     // Chat icon - always show
                     IconButton(icon: "bubble.left") {
                         onChat()
                     }
 
-                    // Focus icon (only for tmux instances with yabai)
-                    if session.isInTmux && isYabaiAvailable {
+                    // Focus icon (only if yabai available)
+                    if isYabaiAvailable {
                         IconButton(icon: "eye") {
                             onFocus()
                         }
@@ -278,7 +314,7 @@ struct InstanceRow: View {
         .padding(.trailing, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
+        .onTapGesture {
             onChat()
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)

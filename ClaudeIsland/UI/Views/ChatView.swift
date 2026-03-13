@@ -6,6 +6,7 @@
 //
 
 import Combine
+import os.log
 import SwiftUI
 
 struct ChatView: View {
@@ -25,6 +26,8 @@ struct ChatView: View {
     @State private var previousHistoryCount: Int = 0
     @State private var isBottomVisible: Bool = true
     @FocusState private var isInputFocused: Bool
+    @ObservedObject private var speechRecognizer = SpeechRecognizer.shared
+    @ObservedObject private var anthropicSTT = AnthropicSpeechRecognizer.shared
 
     init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
         self.sessionId = sessionId
@@ -160,7 +163,7 @@ struct ChatView: View {
             }
         }
         .onChange(of: canSendMessages) { _, canSend in
-            // Auto-focus input when tmux messaging becomes available
+            // Auto-focus input when messaging becomes available
             if canSend && !isInputFocused {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     isInputFocused = true
@@ -168,7 +171,7 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            // Auto-focus input when chat opens and tmux messaging is available
+            // Auto-focus input when chat opens and messaging is available
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 if canSendMessages {
                     isInputFocused = true
@@ -353,14 +356,15 @@ struct ChatView: View {
 
     // MARK: - Input Bar
 
-    /// Can send messages only if session is in tmux
+    /// Can send messages if remote-control bridge is available
     private var canSendMessages: Bool {
-        session.isInTmux && session.tty != nil
+        session.canSendMessages
     }
 
     private var inputBar: some View {
-        HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+        HStack(spacing: 8) {
+            // Text field with rounded background
+            TextField(canSendMessages ? "Message Claude..." : "Connecting to remote-control...", text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
@@ -373,14 +377,37 @@ struct ChatView: View {
                         .fill(Color.white.opacity(canSendMessages ? 0.08 : 0.04))
                         .overlay(
                             RoundedRectangle(cornerRadius: 20)
-                                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                                .strokeBorder(isAnyListening ? Color.red.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
                         )
                 )
+                .onChange(of: inputText) { _, newValue in
+                    DebugFileLogger.log("inputText changed to: '\(newValue)' (length=\(newValue.count))")
+                }
+                .onChange(of: speechRecognizer.transcript) { _, newValue in
+                    if speechRecognizer.isListening && !newValue.isEmpty {
+                        inputText = newValue
+                    }
+                }
+                .onChange(of: anthropicSTT.transcript) { _, newValue in
+                    if anthropicSTT.isListening && !newValue.isEmpty {
+                        inputText = newValue
+                    }
+                }
                 .onSubmit {
+                    DebugFileLogger.log("onSubmit fired, inputText='\(inputText)'")
                     sendMessage()
                 }
 
+            // Microphone button
+            micButton
+
+            // Send button
             Button {
+                DebugFileLogger.log("send button tapped, inputText='\(inputText)'")
+                if isAnyListening {
+                    speechRecognizer.stopListening()
+                    anthropicSTT.stopListening()
+                }
                 sendMessage()
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
@@ -404,6 +431,52 @@ struct ChatView: View {
             .allowsHitTesting(false)
         }
         .zIndex(1) // Render above message list
+        .onAppear {
+            DebugFileLogger.log("inputBar appeared, canSendMessages=\(canSendMessages), isInputFocused=\(isInputFocused)")
+        }
+    }
+
+    // MARK: - Microphone Button
+
+    private var isAnyListening: Bool {
+        speechRecognizer.isListening || anthropicSTT.isListening
+    }
+
+    private var isAnyMicDenied: Bool {
+        speechRecognizer.micDenied || anthropicSTT.micDenied
+    }
+
+    private var micButton: some View {
+        Button(action: {
+            DebugFileLogger.log("mic button tapped, useAnthropicSTT=\(AppSettings.useAnthropicSTT)")
+            if isAnyListening {
+                speechRecognizer.stopListening()
+                anthropicSTT.stopListening()
+            } else if AppSettings.useAnthropicSTT {
+                anthropicSTT.startListening()
+            } else {
+                speechRecognizer.startListening()
+            }
+        }) {
+            Image(systemName: micIcon)
+                .font(.system(size: 14))
+                .foregroundColor(micColor)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var micIcon: String {
+        if isAnyListening { return "mic.fill" }
+        if isAnyMicDenied { return "mic.slash" }
+        return "mic"
+    }
+
+    private var micColor: Color {
+        if isAnyListening { return .red }
+        if isAnyMicDenied { return .red.opacity(0.5) }
+        return .white.opacity(0.5)
     }
 
     // MARK: - Approval Bar
@@ -422,7 +495,6 @@ struct ChatView: View {
     /// Bar for interactive tools like AskUserQuestion that need terminal input
     private var interactivePromptBar: some View {
         ChatInteractivePromptBar(
-            isInTmux: session.isInTmux,
             onGoToTerminal: { focusTerminal() }
         )
     }
@@ -462,9 +534,18 @@ struct ChatView: View {
         sessionMonitor.denyPermission(sessionId: sessionId, reason: nil)
     }
 
+    private static let logger = Logger(subsystem: "com.claudeisland", category: "ChatView")
+
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        DebugFileLogger.log("sendMessage called, text='\(text)', isEmpty=\(text.isEmpty)")
+        guard !text.isEmpty else {
+            DebugFileLogger.log("sendMessage: text is empty, ignoring")
+            return
+        }
+
+        DebugFileLogger.log("sendMessage: sending '\(text.prefix(50))' to session \(session.sessionId.prefix(8))")
+        DebugFileLogger.log("sendMessage: canSendMessages=\(session.canSendMessages), sessionId=\(session.sessionId), cwd=\(session.cwd)")
 
         inputText = ""
 
@@ -479,42 +560,24 @@ struct ChatView: View {
     }
 
     private func sendToSession(_ text: String) async {
-        guard session.isInTmux else { return }
-        guard let tty = session.tty else { return }
-
-        if let target = await findTmuxTarget(tty: tty) {
-            _ = await ToolApprovalHandler.shared.sendMessage(text, to: target)
-        }
-    }
-
-    private func findTmuxTarget(tty: String) async -> TmuxTarget? {
-        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else {
-            return nil
+        DebugFileLogger.log("sendToSession: canSendMessages=\(session.canSendMessages)")
+        guard session.canSendMessages else {
+            DebugFileLogger.log("sendToSession: canSendMessages is false, ABORTING")
+            return
         }
 
-        do {
-            let output = try await ProcessExecutor.shared.run(
-                tmuxPath,
-                arguments: ["list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index} #{pane_tty}"]
-            )
+        DebugFileLogger.log("sendToSession: calling RemoteControlManager.sendMessage(text='\(text.prefix(50))', sessionId=\(session.sessionId), tty=\(session.tty ?? "nil"))")
+        let success = await RemoteControlManager.shared.sendMessage(
+            text,
+            sessionId: session.sessionId,
+            cwd: session.cwd,
+            tty: session.tty
+        )
 
-            let lines = output.components(separatedBy: "\n")
-            for line in lines {
-                let parts = line.components(separatedBy: " ")
-                guard parts.count >= 2 else { continue }
-
-                let target = parts[0]
-                let paneTty = parts[1].replacingOccurrences(of: "/dev/", with: "")
-
-                if paneTty == tty {
-                    return TmuxTarget(from: target)
-                }
-            }
-        } catch {
-            return nil
+        DebugFileLogger.log("sendToSession: result=\(success)")
+        if !success {
+            DebugFileLogger.log("sendToSession: message send FAILED")
         }
-
-        return nil
     }
 }
 
@@ -529,7 +592,7 @@ struct MessageItemView: View {
         case .user(let text):
             UserMessageView(text: text)
         case .assistant(let text):
-            AssistantMessageView(text: text)
+            AssistantMessageView(text: text, messageId: item.id)
         case .toolCall(let tool):
             ToolCallView(tool: tool, sessionId: sessionId)
         case .thinking(let text):
@@ -564,6 +627,10 @@ struct UserMessageView: View {
 
 struct AssistantMessageView: View {
     let text: String
+    var messageId: String? = nil
+
+    @ObservedObject private var speechManager = SpeechManager.shared
+    @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
@@ -575,8 +642,27 @@ struct AssistantMessageView: View {
 
             MarkdownText(text, color: .white.opacity(0.9), fontSize: 13)
 
-            Spacer(minLength: 60)
+            Spacer(minLength: 20)
+
+            // Speaker button — always present to avoid layout shift, opacity for visibility
+            Button {
+                if speechManager.isSpeaking {
+                    speechManager.stop()
+                } else {
+                    speechManager.speak(text, messageId: nil, force: true)
+                }
+            } label: {
+                Image(systemName: speechManager.isSpeaking ? "stop.fill" : "speaker.wave.2")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .opacity(isHovered || speechManager.isSpeaking ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -983,7 +1069,6 @@ struct InterruptedMessageView: View {
 
 /// Bar for interactive tools like AskUserQuestion that need terminal input
 struct ChatInteractivePromptBar: View {
-    let isInTmux: Bool
     let onGoToTerminal: () -> Void
 
     @State private var showContent = false
@@ -1008,9 +1093,7 @@ struct ChatInteractivePromptBar: View {
 
             // Terminal button on right (similar to Allow button)
             Button {
-                if isInTmux {
-                    onGoToTerminal()
-                }
+                onGoToTerminal()
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "terminal")
@@ -1018,10 +1101,10 @@ struct ChatInteractivePromptBar: View {
                     Text("Terminal")
                         .font(.system(size: 13, weight: .medium))
                 }
-                .foregroundColor(isInTmux ? .black : .white.opacity(0.4))
+                .foregroundColor(.black)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(isInTmux ? Color.white.opacity(0.95) : Color.white.opacity(0.1))
+                .background(Color.white.opacity(0.95))
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)

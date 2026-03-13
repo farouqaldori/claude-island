@@ -86,11 +86,6 @@ actor WindowFinder {
         windows.filter { $0.pid == pid }
     }
 
-    /// Find tmux window (title contains "tmux")
-    nonisolated func findTmuxWindow(forTerminalPid pid: Int, windows: [YabaiWindow]) -> YabaiWindow? {
-        windows.first { $0.pid == pid && $0.title.lowercased().contains("tmux") }
-    }
-
     /// Find any non-Claude window for a terminal
     nonisolated func findNonClaudeWindow(forTerminalPid pid: Int, windows: [YabaiWindow]) -> YabaiWindow? {
         windows.first { $0.pid == pid && !$0.title.contains("✳") }

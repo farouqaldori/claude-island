@@ -453,13 +453,27 @@ struct NotchView: View {
 
             // Play notification sound if the session is not actively focused
             if let soundName = AppSettings.notificationSound.soundName {
-                // Check if we should play sound (async check for tmux pane focus)
+                // Check if we should play sound (async check for terminal focus)
                 Task {
                     let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
                     if shouldPlaySound {
                         await MainActor.run {
                             NSSound(named: soundName)?.play()
                         }
+                    }
+                }
+            }
+
+            // Read aloud the last assistant message if enabled
+            if AppSettings.readAloudEnabled {
+                for session in newlyWaitingSessions {
+                    let items = ChatHistoryManager.shared.history(for: session.sessionId)
+                    // Find the last assistant message
+                    if let lastAssistant = items.last(where: {
+                        if case .assistant = $0.type { return true }
+                        return false
+                    }), case .assistant(let text) = lastAssistant.type {
+                        SpeechManager.shared.speak(text, messageId: lastAssistant.id)
                     }
                 }
             }

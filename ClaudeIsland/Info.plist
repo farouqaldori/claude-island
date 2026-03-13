@@ -17,6 +17,12 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2025. All rights reserved.</string>
 
+    <!-- Microphone & Speech Recognition -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Claude Island uses the microphone for voice-to-text input.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Claude Island uses speech recognition to transcribe your voice into text messages.</string>
+
     <!-- Sparkle Update Configuration -->
     <key>SUFeedURL</key>
     <string>https://claudeisland.com/appcast.xml</string>

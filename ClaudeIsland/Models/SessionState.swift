@@ -21,7 +21,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
     var pid: Int?
     var tty: String?
-    var isInTmux: Bool
+    var canSendMessages: Bool
 
     // MARK: - State Machine
 
@@ -70,7 +70,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         projectName: String? = nil,
         pid: Int? = nil,
         tty: String? = nil,
-        isInTmux: Bool = false,
+        canSendMessages: Bool = true,
         phase: SessionPhase = .idle,
         chatItems: [ChatHistoryItem] = [],
         toolTracker: ToolTracker = ToolTracker(),
@@ -88,7 +88,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
         self.pid = pid
         self.tty = tty
-        self.isInTmux = isInTmux
+        self.canSendMessages = canSendMessages
         self.phase = phase
         self.chatItems = chatItems
         self.toolTracker = toolTracker

@@ -31,6 +31,18 @@ class ClaudeSessionMonitor: ObservableObject {
     // MARK: - Monitoring Lifecycle
 
     func startMonitoring() {
+        // Check OAuth login state (non-blocking, doesn't depend on bridge)
+        OAuthLoginManager.shared.checkCredentials()
+
+        // Start polling for remote sessions via API
+        Task {
+            await RemoteSessionScanner.shared.startPolling { discovered in
+                Task {
+                    await SessionStore.shared.process(.remoteSessionsUpdated(discovered))
+                }
+            }
+        }
+
         HookSocketServer.shared.start(
             onEvent: { event in
                 Task {
@@ -72,6 +84,9 @@ class ClaudeSessionMonitor: ObservableObject {
 
     func stopMonitoring() {
         HookSocketServer.shared.stop()
+        Task {
+            await RemoteSessionScanner.shared.stopPolling()
+        }
     }
 
     // MARK: - Permission Handling
@@ -110,6 +125,13 @@ class ClaudeSessionMonitor: ObservableObject {
             await SessionStore.shared.process(
                 .permissionDenied(sessionId: sessionId, toolUseId: permission.toolUseId, reason: reason)
             )
+        }
+    }
+
+    /// Rename a session
+    func renameSession(sessionId: String, newTitle: String) {
+        Task {
+            await SessionStore.shared.process(.renameSession(sessionId: sessionId, newTitle: newTitle))
         }
     }
 
