@@ -18,29 +18,32 @@ class NotchWindowController: NSWindowController {
         self.screen = screen
 
         let screenFrame = screen.frame
-        let notchSize = screen.notchSize
 
-        // Window covers full width at top, tall enough for largest content (chat view)
+        // Window positioned near the right side of the screen (or restored from user preference)
         let windowHeight: CGFloat = 750
+        let windowWidth: CGFloat = 620
+        let savedX = UserDefaults.standard.double(forKey: "ClaudeIsland.windowX")
+        let windowX: CGFloat = savedX > 0 ? CGFloat(savedX) : screenFrame.maxX - windowWidth
         let windowFrame = NSRect(
-            x: screenFrame.origin.x,
+            x: max(screenFrame.origin.x, min(windowX, screenFrame.maxX - windowWidth)),
             y: screenFrame.maxY - windowHeight,
-            width: screenFrame.width,
+            width: windowWidth,
             height: windowHeight
         )
 
-        // Device notch rect - positioned at center
+        // Small anchor rect centered in the window
+        let anchorSize = CGSize(width: 30, height: 24)
         let deviceNotchRect = CGRect(
-            x: (screenFrame.width - notchSize.width) / 2,
+            x: (windowWidth - anchorSize.width) / 2,
             y: 0,
-            width: notchSize.width,
-            height: notchSize.height
+            width: anchorSize.width,
+            height: anchorSize.height
         )
 
-        // Create view model
+        // Create view model — use windowFrame as the "screen" rect so SwiftUI centers within the window
         self.viewModel = NotchViewModel(
             deviceNotchRect: deviceNotchRect,
-            screenRect: screenFrame,
+            screenRect: windowFrame,
             windowHeight: windowHeight,
             hasPhysicalNotch: screen.hasPhysicalNotch
         )
@@ -61,35 +64,30 @@ class NotchWindowController: NSWindowController {
 
         notchWindow.setFrame(windowFrame, display: true)
 
-        // Dynamically toggle mouse event handling based on notch state:
-        // - Closed: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
-        // - Opened: ignoresMouseEvents = false (buttons inside panel work)
-        viewModel.$status
+        // Accept mouse events when hovering over the pill OR when opened.
+        // This lets clicks/drags work on the pill while passing through everywhere else.
+        viewModel.$isHovering
+            .combineLatest(viewModel.$status)
             .receive(on: DispatchQueue.main)
-            .sink { [weak notchWindow, weak viewModel] status in
+            .sink { [weak notchWindow, weak viewModel] (hovering, status) in
                 switch status {
                 case .opened:
-                    // Accept mouse events when opened so buttons work
                     notchWindow?.ignoresMouseEvents = false
-                    // Don't steal focus when opened by notification (task finished)
                     if viewModel?.openReason != .notification {
                         NSApp.activate(ignoringOtherApps: false)
                         notchWindow?.makeKey()
                     }
                 case .closed, .popping:
-                    // Ignore mouse events when closed so clicks pass through
-                    notchWindow?.ignoresMouseEvents = true
+                    // Accept events only when hovering over the pill
+                    notchWindow?.ignoresMouseEvents = !hovering
                 }
             }
             .store(in: &cancellables)
 
-        // Start with ignoring mouse events (closed state)
+        // Start with ignoring mouse events
         notchWindow.ignoresMouseEvents = true
 
-        // Perform boot animation after a brief delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.viewModel.performBootAnimation()
-        }
+        // No boot animation for menubar mode — panel opens on status item click
     }
 
     required init?(coder: NSCoder) {

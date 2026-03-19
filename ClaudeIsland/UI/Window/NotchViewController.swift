@@ -47,27 +47,29 @@ class NotchViewController: NSViewController {
             // Window coordinates: origin at bottom-left, Y increases upward
             // The window is positioned at top of screen, so panel is at top of window
             let windowHeight = geometry.windowHeight
+            let screenWidth = geometry.screenRect.width
+            // Anchor X relative to the window (window starts at screenFrame.origin.x)
+            let anchorInWindow = vm.anchorX - geometry.screenRect.origin.x
 
             switch vm.status {
             case .opened:
                 let panelSize = vm.openedSize
-                // Panel is centered horizontally, anchored to top
                 let panelWidth = panelSize.width + 52  // Account for corner radius padding
                 let panelHeight = panelSize.height
-                let screenWidth = geometry.screenRect.width
+                // Clamp so panel stays on screen
+                let halfPanel = panelWidth / 2
+                let clampedAnchor = max(halfPanel + 10, min(anchorInWindow, screenWidth - halfPanel - 10))
                 return CGRect(
-                    x: (screenWidth - panelWidth) / 2,
+                    x: clampedAnchor - halfPanel,
                     y: windowHeight - panelHeight,
                     width: panelWidth,
                     height: panelHeight
                 )
             case .closed, .popping:
-                // When closed, use the notch rect
+                // Small anchor rect at status item position
                 let notchRect = geometry.deviceNotchRect
-                let screenWidth = geometry.screenRect.width
-                // Add some padding for easier interaction
                 return CGRect(
-                    x: (screenWidth - notchRect.width) / 2 - 10,
+                    x: anchorInWindow - notchRect.width / 2 - 10,
                     y: windowHeight - notchRect.height - 5,
                     width: notchRect.width + 20,
                     height: notchRect.height + 10

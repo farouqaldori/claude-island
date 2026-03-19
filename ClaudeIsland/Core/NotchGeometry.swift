@@ -8,16 +8,18 @@
 import CoreGraphics
 import Foundation
 
-/// Pure geometry calculations for the notch
+/// Pure geometry calculations for the notch / menubar panel
 struct NotchGeometry: Sendable {
     let deviceNotchRect: CGRect
     let screenRect: CGRect
     let windowHeight: CGFloat
+    /// Center X position for the panel anchor (status item position in screen coords)
+    var anchorX: CGFloat
 
-    /// The notch rect in screen coordinates (for hit testing with global mouse position)
+    /// The anchor rect in screen coordinates (for hit testing with global mouse position)
     var notchScreenRect: CGRect {
         CGRect(
-            x: screenRect.midX - deviceNotchRect.width / 2,
+            x: anchorX - deviceNotchRect.width / 2,
             y: screenRect.maxY - deviceNotchRect.height,
             width: deviceNotchRect.width,
             height: deviceNotchRect.height
@@ -29,8 +31,12 @@ struct NotchGeometry: Sendable {
         // Match the actual rendered panel size (tuned to match visual output)
         let width = size.width - 6
         let height = size.height - 30
+        // Clamp so the panel stays on screen
+        let halfWidth = width / 2
+        let clampedX = max(screenRect.minX + halfWidth + 10,
+                          min(anchorX, screenRect.maxX - halfWidth - 10))
         return CGRect(
-            x: screenRect.midX - width / 2,
+            x: clampedX - width / 2,
             y: screenRect.maxY - height,
             width: width,
             height: height
