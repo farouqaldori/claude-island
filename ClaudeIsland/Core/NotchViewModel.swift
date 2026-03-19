@@ -53,9 +53,17 @@ class NotchViewModel: ObservableObject {
 
     // MARK: - Geometry
 
-    let geometry: NotchGeometry
+    var geometry: NotchGeometry
     let spacing: CGFloat = 12
     let hasPhysicalNotch: Bool
+
+    /// Screen rect of the status item button (used to avoid closing when clicking it)
+    var statusItemRect: CGRect = .zero
+
+    /// Center X anchor for the panel (status item position in screen coords)
+    @Published var anchorX: CGFloat {
+        didSet { geometry.anchorX = anchorX }
+    }
 
     var deviceNotchRect: CGRect { geometry.deviceNotchRect }
     var screenRect: CGRect { geometry.screenRect }
@@ -94,19 +102,26 @@ class NotchViewModel: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private let events = EventMonitors.shared
-    private var hoverTimer: DispatchWorkItem?
 
     // MARK: - Initialization
 
     init(deviceNotchRect: CGRect, screenRect: CGRect, windowHeight: CGFloat, hasPhysicalNotch: Bool) {
+        let initialAnchorX = screenRect.midX  // Center of the window
+        self._anchorX = Published(initialValue: initialAnchorX)
         self.geometry = NotchGeometry(
             deviceNotchRect: deviceNotchRect,
             screenRect: screenRect,
-            windowHeight: windowHeight
+            windowHeight: windowHeight,
+            anchorX: initialAnchorX
         )
         self.hasPhysicalNotch = hasPhysicalNotch
         setupEventHandlers()
         observeSelectors()
+    }
+
+    /// Update the anchor position (called when status item is clicked)
+    func updateAnchor(screenX: CGFloat) {
+        anchorX = screenX
     }
 
     private func observeSelectors() {
@@ -147,50 +162,26 @@ class NotchViewModel: ObservableObject {
     private var currentChatSession: SessionState?
 
     private func handleMouseMove(_ location: CGPoint) {
-        let inNotch = geometry.isPointInNotch(location)
+        let inPill = geometry.isPointInNotch(location)
         let inOpened = status == .opened && geometry.isPointInOpenedPanel(location, size: openedSize)
+        let newHovering = inPill || inOpened
 
-        let newHovering = inNotch || inOpened
-
-        // Only update if changed to prevent unnecessary re-renders
         guard newHovering != isHovering else { return }
-
         isHovering = newHovering
-
-        // Cancel any pending hover timer
-        hoverTimer?.cancel()
-        hoverTimer = nil
-
-        // Start hover timer to auto-expand after 1 second
-        if isHovering && (status == .closed || status == .popping) {
-            let workItem = DispatchWorkItem { [weak self] in
-                guard let self = self, self.isHovering else { return }
-                self.notchOpen(reason: .hover)
-            }
-            hoverTimer = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: workItem)
-        }
     }
 
     private func handleMouseDown() {
         let location = NSEvent.mouseLocation
 
-        switch status {
-        case .opened:
-            if geometry.isPointOutsidePanel(location, size: openedSize) {
-                notchClose()
-                // Re-post the click so it reaches the window/app behind us
-                repostClickAt(location)
-            } else if geometry.notchScreenRect.contains(location) {
-                // Clicking notch while opened - only close if NOT in chat mode
-                if !isInChatMode {
-                    notchClose()
-                }
-            }
-        case .closed, .popping:
-            if geometry.isPointInNotch(location) {
-                notchOpen(reason: .click)
-            }
+        // Only handle click-outside-to-close when opened
+        guard status == .opened else { return }
+
+        // Don't close if clicking the status item
+        if !statusItemRect.isEmpty && statusItemRect.contains(location) { return }
+
+        if geometry.isPointOutsidePanel(location, size: openedSize) {
+            notchClose()
+            repostClickAt(location)
         }
     }
 

@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
     private var screenObserver: ScreenObserver?
     private var updateCheckTimer: Timer?
+    private var statusItem: NSStatusItem?
 
     static var shared: AppDelegate?
     let updater: SPUUpdater
@@ -70,8 +71,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         HookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
 
+        // Create status item first so it's visible even if window setup fails
+        setupStatusItem()
+
         windowManager = WindowManager()
         _ = windowManager?.setupNotchWindow()
+
+        // Sync anchor now that window/viewModel exist
+        DispatchQueue.main.async { [weak self] in
+            self?.syncStatusItemPosition()
+        }
 
         screenObserver = ScreenObserver { [weak self] in
             self?.handleScreenChange()
@@ -89,6 +98,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleScreenChange() {
         _ = windowManager?.setupNotchWindow()
+        // Re-sync anchor position after screen change
+        syncStatusItemPosition()
+    }
+
+    private func setupStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem?.autosaveName = "ClaudeIslandStatus"
+        statusItem?.isVisible = true
+
+        guard let button = statusItem?.button else { return }
+
+        if let img = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: "Claude Island") {
+            img.isTemplate = true
+            img.size = NSSize(width: 18, height: 18)
+            button.image = img
+        } else {
+            button.title = "CI"
+        }
+
+        button.action = #selector(statusItemClicked(_:))
+        button.target = self
+    }
+
+    @objc private func statusItemClicked(_ sender: Any?) {
+        guard let viewModel = windowController?.viewModel else { return }
+
+        // Update anchor to current status item position (only if on-screen)
+        syncStatusItemPosition()
+
+        // Toggle panel
+        if viewModel.status == .opened {
+            viewModel.notchClose()
+        } else {
+            viewModel.notchOpen(reason: .click)
+        }
+    }
+
+    private func syncStatusItemPosition() {
+        guard let viewModel = windowController?.viewModel else { return }
+
+        // Use status item position only if it's actually on a visible screen
+        if let button = statusItem?.button,
+           let buttonWindow = button.window,
+           buttonWindow.screen != nil {
+            let frame = buttonWindow.frame
+            viewModel.statusItemRect = frame
+            viewModel.updateAnchor(screenX: frame.midX)
+        }
+        // Otherwise keep the default (window center) — don't override with off-screen position
     }
 
     func applicationWillTerminate(_ notification: Notification) {

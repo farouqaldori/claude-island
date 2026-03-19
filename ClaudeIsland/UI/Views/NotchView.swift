@@ -26,6 +26,7 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
+    @State private var isDragging: Bool = false
 
     @Namespace private var activityNamespace
 
@@ -183,6 +184,26 @@ struct NotchView: View {
                             viewModel.notchOpen(reason: .click)
                         }
                     }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                guard viewModel.status != .opened else { return }
+                                isDragging = true
+                                // Move the window horizontally
+                                if let window = NSApp.windows.first(where: { $0 is NotchPanel }) {
+                                    var frame = window.frame
+                                    frame.origin.x += value.translation.width
+                                    window.setFrame(frame, display: true)
+                                }
+                            }
+                            .onEnded { _ in
+                                isDragging = false
+                                // Save position to UserDefaults
+                                if let window = NSApp.windows.first(where: { $0 is NotchPanel }) {
+                                    UserDefaults.standard.set(Double(window.frame.origin.x), forKey: "ClaudeIsland.windowX")
+                                }
+                            }
+                    )
             }
         }
         .opacity(isVisible ? 1 : 0)
@@ -190,10 +211,8 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
-            // On non-notched devices, keep visible so users have a target to interact with
-            if !viewModel.hasPhysicalNotch {
-                isVisible = true
-            }
+            // Always visible in menubar mode — the status item is the primary indicator
+            isVisible = true
         }
         .onChange(of: viewModel.status) { oldStatus, newStatus in
             handleStatusChange(from: oldStatus, to: newStatus)
@@ -246,33 +265,24 @@ struct NotchView: View {
     @ViewBuilder
     private var headerRow: some View {
         HStack(spacing: 0) {
-            // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
-            if showClosedActivity {
-                HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
-                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+            // Left side - always show crab icon (animated legs when processing)
+            HStack(spacing: 4) {
+                ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
+                    .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: true)
 
-                    // Permission indicator only (amber) - waiting for input shows checkmark on right
-                    if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
-                            .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
-                    }
+                if hasPendingPermission {
+                    PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                        .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
                 }
-                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
-                .padding(.leading, viewModel.status == .opened ? 8 : 0)
             }
+            .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
+            .padding(.leading, viewModel.status == .opened ? 8 : 0)
 
             // Center content
             if viewModel.status == .opened {
-                // Opened: show header content
                 openedHeaderContent
-            } else if !showClosedActivity {
-                // Closed without activity: empty space
-                Rectangle()
-                    .fill(.clear)
-                    .frame(width: closedNotchSize.width - 20)
             } else {
-                // Closed with activity: black spacer (with optional bounce)
+                // Closed: black spacer (with optional bounce)
                 Rectangle()
                     .fill(.black)
                     .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
@@ -285,7 +295,6 @@ struct NotchView: View {
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
                 } else if hasWaitingForInput {
-                    // Checkmark for waiting-for-input on the right side
                     ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 20 : sideWidth)
@@ -373,27 +382,14 @@ struct NotchView: View {
 
     private func handleProcessingChange() {
         if isAnyProcessing || hasPendingPermission {
-            // Show claude activity when processing or waiting for permission
             activityCoordinator.showActivity(type: .claude)
-            isVisible = true
         } else if hasWaitingForInput {
-            // Keep visible for waiting-for-input but hide the processing spinner
             activityCoordinator.hideActivity()
-            isVisible = true
         } else {
-            // Hide activity when done
             activityCoordinator.hideActivity()
-
-            // Delay hiding the notch until animation completes
-            // Don't hide on non-notched devices - users need a visible target
-            if viewModel.status == .closed && viewModel.hasPhysicalNotch {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && viewModel.status == .closed {
-                        isVisible = false
-                    }
-                }
-            }
         }
+        // Always visible in menubar mode
+        isVisible = true
     }
 
     private func handleStatusChange(from oldStatus: NotchStatus, to newStatus: NotchStatus) {
@@ -405,13 +401,8 @@ struct NotchView: View {
                 waitingForInputTimestamps.removeAll()
             }
         case .closed:
-            // Don't hide on non-notched devices - users need a visible target
-            guard viewModel.hasPhysicalNotch else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !activityCoordinator.expandingActivity.show {
-                    isVisible = false
-                }
-            }
+            // In menubar mode, always stay visible (status item is the primary indicator)
+            break
         }
     }
 
