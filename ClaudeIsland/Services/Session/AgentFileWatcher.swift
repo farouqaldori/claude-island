@@ -42,7 +42,7 @@ class AgentFileWatcher {
 
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-")
                             .replacingOccurrences(of: ".", with: "-")
-        self.filePath = NSHomeDirectory() + "/.claude/projects/" + projectDir + "/agent-" + agentId + ".jsonl"
+        self.filePath = ClaudeConfigDir.projectsPath + "/" + projectDir + "/agent-" + agentId + ".jsonl"
     }
 
     /// Start watching the agent file
