@@ -10,15 +10,15 @@ RELEASE_DIR="$PROJECT_DIR/releases"
 KEYS_DIR="$PROJECT_DIR/.sparkle-keys"
 
 # GitHub repository (owner/repo format)
-GITHUB_REPO="farouqaldori/claude-island"
+GITHUB_REPO="zabrodsk/opennotch-agent"
 
 # Website repo for auto-updating appcast
-WEBSITE_DIR="${CLAUDE_ISLAND_WEBSITE:-$PROJECT_DIR/../ClaudeIsland-website}"
+WEBSITE_DIR="${OPENNOTCH_AGENT_WEBSITE:-$PROJECT_DIR/../OpenNotchAgent-website}"
 WEBSITE_PUBLIC="$WEBSITE_DIR/public"
 
-APP_PATH="$EXPORT_PATH/Claude Island.app"
-APP_NAME="ClaudeIsland"
-KEYCHAIN_PROFILE="ClaudeIsland"
+APP_PATH="$EXPORT_PATH/OpenNotch Agent.app"
+APP_NAME="OpenNotchAgent"
+KEYCHAIN_PROFILE="OpenNotchAgent"
 
 echo "=== Creating Release ==="
 echo ""
@@ -100,17 +100,17 @@ fi
 if command -v create-dmg &> /dev/null; then
     echo "Using create-dmg for prettier output..."
     create-dmg \
-        --volname "Claude Island" \
+        --volname "OpenNotch Agent" \
         --window-size 600 400 \
         --icon-size 100 \
-        --icon "Claude Island.app" 150 200 \
+        --icon "OpenNotch Agent.app" 150 200 \
         --app-drop-link 450 200 \
-        --hide-extension "Claude Island.app" \
+        --hide-extension "OpenNotch Agent.app" \
         "$DMG_PATH" \
         "$APP_PATH"
 else
     echo "Using hdiutil (install create-dmg for prettier DMG: brew install create-dmg)"
-    hdiutil create -volname "Claude Island" \
+    hdiutil create -volname "OpenNotch Agent" \
         -srcfolder "$APP_PATH" \
         -ov -format UDZO \
         "$DMG_PATH"
@@ -144,7 +144,7 @@ SPARKLE_SIGN=""
 GENERATE_APPCAST=""
 
 POSSIBLE_PATHS=(
-    "$HOME/Library/Developer/Xcode/DerivedData/ClaudeIsland-*/SourcePackages/artifacts/sparkle/Sparkle/bin"
+    "$HOME/Library/Developer/Xcode/DerivedData/*/SourcePackages/artifacts/sparkle/Sparkle/bin"
 )
 
 for path_pattern in "${POSSIBLE_PATHS[@]}"; do
@@ -215,16 +215,16 @@ else
         echo "Creating release v$VERSION..."
         gh release create "v$VERSION" "$DMG_PATH" \
             --repo "$GITHUB_REPO" \
-            --title "Claude Island v$VERSION" \
-            --notes "## Claude Island v$VERSION
+            --title "OpenNotch Agent v$VERSION" \
+            --notes "## OpenNotch Agent v$VERSION
 
 ### Installation
 1. Download \`$APP_NAME-$VERSION.dmg\`
-2. Open the DMG and drag Claude Island to Applications
-3. Launch Claude Island from Applications
+2. Open the DMG and drag OpenNotch Agent to Applications
+3. Launch OpenNotch Agent from Applications
 
 ### Auto-updates
-After installation, Claude Island will automatically check for updates."
+After installation, OpenNotch Agent will automatically check for updates."
     fi
 
     GITHUB_DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/v$VERSION/$APP_NAME-$VERSION.dmg"

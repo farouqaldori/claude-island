@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Island</string>
+    <string>OpenNotch Agent</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Island</string>
+    <string>OpenNotch Agent</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleVersion</key>
@@ -19,7 +19,7 @@
 
     <!-- Sparkle Update Configuration -->
     <key>SUFeedURL</key>
-    <string>https://claudeisland.com/appcast.xml</string>
+    <string>https://opennotchagent.com/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>w5NwH5KRfE7LfeZ09J8lWx3UQrWTqUbfH4HHBa1OPRk=</string>
     <key>SUEnableAutomaticChecks</key>

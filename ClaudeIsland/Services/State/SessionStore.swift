@@ -54,6 +54,9 @@ actor SessionStore {
         case .hookReceived(let hookEvent):
             await processHookEvent(hookEvent)
 
+        case .codexReceived(let codexEvent):
+            await processCodexEvent(codexEvent)
+
         case .permissionApproved(let sessionId, let toolUseId):
             await processPermissionApproved(sessionId: sessionId, toolUseId: toolUseId)
 
@@ -117,8 +120,9 @@ actor SessionStore {
 
     private func processHookEvent(_ event: HookEvent) async {
         let sessionId = event.sessionId
-        let isNewSession = sessions[sessionId] == nil
-        var session = sessions[sessionId] ?? createSession(from: event)
+        let existingSession = sessions[sessionId]
+        let isNewSession = existingSession.map { _ in false } ?? true
+        var session = existingSession ?? createSession(from: event)
 
         // Track new session in Mixpanel
         if isNewSession {
@@ -167,6 +171,50 @@ actor SessionStore {
         if event.shouldSyncFile {
             scheduleFileSync(sessionId: sessionId, cwd: event.cwd)
         }
+    }
+
+    private func processCodexEvent(_ event: CodexEvent) async {
+        let sessionKey = event.provider.prefixedSessionId(event.sessionId)
+
+        if event.status == "ended" {
+            sessions.removeValue(forKey: sessionKey)
+            cancelPendingSync(sessionId: sessionKey)
+            return
+        }
+
+        var session = sessions[sessionKey] ?? SessionState(
+            sessionId: sessionKey,
+            cwd: event.cwd,
+            projectName: URL(fileURLWithPath: event.cwd).lastPathComponent,
+            isInTmux: true,
+            phase: .idle
+        )
+        session.lastActivity = event.timestamp
+
+        let nextPhase: SessionPhase
+        switch event.status {
+        case "processing":
+            nextPhase = .processing
+        case "waiting_for_input":
+            nextPhase = .waitingForInput
+        case "waiting_for_approval":
+            let stableToolUseId = event.toolUseId ?? "\(event.provider.rawValue)-\(event.sessionId)-\(Int(event.timestamp.timeIntervalSince1970))"
+            nextPhase = .waitingForApproval(PermissionContext(
+                provider: event.provider,
+                toolUseId: stableToolUseId,
+                toolName: event.tool ?? "exec_command",
+                toolInput: event.toolInput,
+                receivedAt: event.timestamp
+            ))
+        default:
+            nextPhase = .idle
+        }
+
+        if session.phase.canTransition(to: nextPhase) {
+            session.phase = nextPhase
+        }
+
+        sessions[sessionKey] = session
     }
 
     private func createSession(from event: HookEvent) -> SessionState {
@@ -326,6 +374,7 @@ actor SessionStore {
         if let nextPending = findNextPendingTool(in: session, excluding: toolUseId) {
             // Another tool is waiting - stay in waitingForApproval with that tool's context
             let newPhase = SessionPhase.waitingForApproval(PermissionContext(
+                provider: .claude,
                 toolUseId: nextPending.id,
                 toolName: nextPending.name,
                 toolInput: nil,  // We don't have the input stored in chatItems
@@ -390,6 +439,7 @@ actor SessionStore {
         if case .waitingForApproval(let ctx) = session.phase, ctx.toolUseId == toolUseId {
             if let nextPending = findNextPendingTool(in: session, excluding: toolUseId) {
                 let newPhase = SessionPhase.waitingForApproval(PermissionContext(
+                    provider: .claude,
                     toolUseId: nextPending.id,
                     toolName: nextPending.name,
                     toolInput: nil,
@@ -428,6 +478,7 @@ actor SessionStore {
         if let nextPending = findNextPendingTool(in: session, excluding: toolUseId) {
             // Another tool is waiting - stay in waitingForApproval with that tool's context
             let newPhase = SessionPhase.waitingForApproval(PermissionContext(
+                provider: .claude,
                 toolUseId: nextPending.id,
                 toolName: nextPending.name,
                 toolInput: nil,
@@ -464,6 +515,7 @@ actor SessionStore {
         if let nextPending = findNextPendingTool(in: session, excluding: toolUseId) {
             // Another tool is waiting - switch to that tool's context
             let newPhase = SessionPhase.waitingForApproval(PermissionContext(
+                provider: .claude,
                 toolUseId: nextPending.id,
                 toolName: nextPending.name,
                 toolInput: nil,
@@ -849,20 +901,38 @@ actor SessionStore {
     // MARK: - History Loading
 
     private func loadHistoryFromFile(sessionId: String, cwd: String) async {
-        // Parse file asynchronously
-        let messages = await ConversationParser.shared.parseFullConversation(
-            sessionId: sessionId,
-            cwd: cwd
-        )
-        let completedTools = await ConversationParser.shared.completedToolIds(for: sessionId)
-        let toolResults = await ConversationParser.shared.toolResults(for: sessionId)
-        let structuredResults = await ConversationParser.shared.structuredResults(for: sessionId)
+        let isCodexSession = sessionId.hasPrefix("codex:")
+        let messages: [ChatMessage]
+        let completedTools: Set<String>
+        let toolResults: [String: ConversationParser.ToolResult]
+        let structuredResults: [String: ToolResultData]
+        let conversationInfo: ConversationInfo
 
-        // Also parse conversationInfo (summary, lastMessage, etc.)
-        let conversationInfo = await ConversationParser.shared.parse(
-            sessionId: sessionId,
-            cwd: cwd
-        )
+        if isCodexSession {
+            messages = await CodexConversationParser.shared.parseFullConversation(
+                sessionId: sessionId,
+                cwd: cwd
+            )
+            completedTools = await CodexConversationParser.shared.completedToolIds(for: sessionId)
+            toolResults = await CodexConversationParser.shared.toolResults(for: sessionId)
+            structuredResults = await CodexConversationParser.shared.structuredResults(for: sessionId)
+            conversationInfo = await CodexConversationParser.shared.parse(
+                sessionId: sessionId,
+                cwd: cwd
+            )
+        } else {
+            messages = await ConversationParser.shared.parseFullConversation(
+                sessionId: sessionId,
+                cwd: cwd
+            )
+            completedTools = await ConversationParser.shared.completedToolIds(for: sessionId)
+            toolResults = await ConversationParser.shared.toolResults(for: sessionId)
+            structuredResults = await ConversationParser.shared.structuredResults(for: sessionId)
+            conversationInfo = await ConversationParser.shared.parse(
+                sessionId: sessionId,
+                cwd: cwd
+            )
+        }
 
         // Process loaded history
         await process(.historyLoaded(
@@ -927,11 +997,41 @@ actor SessionStore {
             try? await Task.sleep(nanoseconds: syncDebounceNs)
             guard !Task.isCancelled else { return }
 
+            let isCodexSession = sessionId.hasPrefix("codex:")
+
             // Parse incrementally - only get NEW messages since last call
-            let result = await ConversationParser.shared.parseIncremental(
-                sessionId: sessionId,
-                cwd: cwd
+            let result: (
+                newMessages: [ChatMessage],
+                completedToolIds: Set<String>,
+                toolResults: [String: ConversationParser.ToolResult],
+                structuredResults: [String: ToolResultData],
+                clearDetected: Bool
             )
+            if isCodexSession {
+                let codexResult = await CodexConversationParser.shared.parseIncremental(
+                    sessionId: sessionId,
+                    cwd: cwd
+                )
+                result = (
+                    newMessages: codexResult.newMessages,
+                    completedToolIds: codexResult.completedToolIds,
+                    toolResults: codexResult.toolResults,
+                    structuredResults: codexResult.structuredResults,
+                    clearDetected: codexResult.clearDetected
+                )
+            } else {
+                let claudeResult = await ConversationParser.shared.parseIncremental(
+                    sessionId: sessionId,
+                    cwd: cwd
+                )
+                result = (
+                    newMessages: claudeResult.newMessages,
+                    completedToolIds: claudeResult.completedToolIds,
+                    toolResults: claudeResult.toolResults,
+                    structuredResults: claudeResult.structuredResults,
+                    clearDetected: claudeResult.clearDetected
+                )
+            }
 
             if result.clearDetected {
                 await self?.process(.clearDetected(sessionId: sessionId))

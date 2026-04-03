@@ -28,7 +28,7 @@ struct ClaudeInstancesView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.4))
 
-            Text("Run claude in terminal")
+            Text("Run Claude or Codex in terminal")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
         }
@@ -66,18 +66,25 @@ struct ClaudeInstancesView: View {
     }
 
     private var instancesList: some View {
-        ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 2) {
-                ForEach(sortedInstances) { session in
-                    InstanceRow(
-                        session: session,
-                        onFocus: { focusSession(session) },
-                        onChat: { openChat(session) },
-                        onArchive: { archiveSession(session) },
-                        onApprove: { approveSession(session) },
-                        onReject: { rejectSession(session) }
-                    )
-                    .id(session.stableId)
+        let groupedByProvider = Dictionary(grouping: sortedInstances, by: \.provider)
+        let orderedProviders = AgentProvider.allCases.filter { provider in
+            !(groupedByProvider[provider] ?? []).isEmpty
+        }
+
+        return ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(spacing: 10) {
+                ForEach(orderedProviders, id: \.self) { provider in
+                    if let sessions = groupedByProvider[provider], !sessions.isEmpty {
+                        ProviderSection(
+                            provider: provider,
+                            sessions: sessions,
+                            onFocus: focusSession,
+                            onChat: openChat,
+                            onArchive: archiveSession,
+                            onApprove: approveSession,
+                            onReject: rejectSession
+                        )
+                    }
                 }
             }
             .padding(.vertical, 4)
@@ -116,6 +123,74 @@ struct ClaudeInstancesView: View {
     }
 }
 
+private struct ProviderSection: View {
+    let provider: AgentProvider
+    let sessions: [SessionState]
+    let onFocus: (SessionState) -> Void
+    let onChat: (SessionState) -> Void
+    let onArchive: (SessionState) -> Void
+    let onApprove: (SessionState) -> Void
+    let onReject: (SessionState) -> Void
+
+    private var theme: ProviderTheme { provider.theme }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if provider == .codex {
+                    Image("CodexLogo")
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                } else {
+                    Circle()
+                        .fill(theme.accent)
+                        .frame(width: 8, height: 8)
+                }
+
+                Text(provider.displayName)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.accentMuted)
+
+                Text("\(sessions.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(theme.badgeBackground)
+                    .clipShape(Capsule())
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 4)
+
+            VStack(spacing: 3) {
+                ForEach(sessions) { session in
+                    InstanceRow(
+                        session: session,
+                        onFocus: { onFocus(session) },
+                        onChat: { onChat(session) },
+                        onArchive: { onArchive(session) },
+                        onApprove: { onApprove(session) },
+                        onReject: { onReject(session) }
+                    )
+                    .id(session.stableId)
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 4)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(theme.sectionBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(theme.sectionBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
 // MARK: - Instance Row
 
 struct InstanceRow: View {
@@ -130,9 +205,9 @@ struct InstanceRow: View {
     @State private var spinnerPhase = 0
     @State private var isYabaiAvailable = false
 
-    private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
     private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
+    private var theme: ProviderTheme { session.provider.theme }
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
@@ -142,7 +217,10 @@ struct InstanceRow: View {
     /// Whether the pending tool requires interactive input (not just approve/deny)
     private var isInteractiveTool: Bool {
         guard let toolName = session.pendingToolName else { return false }
-        return toolName == "AskUserQuestion"
+        let normalized = toolName.lowercased()
+        return normalized == "askuserquestion"
+            || normalized == "ask_user_question"
+            || normalized == "ask_user"
     }
 
     var body: some View {
@@ -153,10 +231,28 @@ struct InstanceRow: View {
 
             // Text content
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if session.provider == .codex {
+                        Image("CodexLogo")
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .frame(width: 12, height: 12)
+                    }
+
+                    Text(session.provider.displayName)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(theme.accentMuted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(theme.badgeBackground)
+                        .clipShape(Capsule())
+
+                    Text(session.displayTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
 
                 // Show tool call when waiting for approval, otherwise last activity
                 if isWaitingForApproval, let toolName = session.pendingToolName {
@@ -245,6 +341,7 @@ struct InstanceRow: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else if isWaitingForApproval {
                 InlineApprovalButtons(
+                    provider: session.provider,
                     onChat: onChat,
                     onApprove: onApprove,
                     onReject: onReject
@@ -284,7 +381,7 @@ struct InstanceRow: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
+                .fill(isHovered ? theme.rowHover : theme.rowBackground)
         )
         .onHover { isHovered = $0 }
         .task {
@@ -298,7 +395,7 @@ struct InstanceRow: View {
         case .processing, .compacting:
             Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
                 .font(.system(size: 12, weight: .bold))
-                .foregroundColor(claudeOrange)
+                .foregroundColor(theme.accent)
                 .onReceive(spinnerTimer) { _ in
                     spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
                 }
@@ -326,6 +423,7 @@ struct InstanceRow: View {
 
 /// Compact inline approval buttons with staggered animation
 struct InlineApprovalButtons: View {
+    let provider: AgentProvider
     let onChat: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
@@ -333,6 +431,7 @@ struct InlineApprovalButtons: View {
     @State private var showChatButton = false
     @State private var showDenyButton = false
     @State private var showAllowButton = false
+    private var theme: ProviderTheme { provider.theme }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -346,12 +445,12 @@ struct InlineApprovalButtons: View {
             Button {
                 onReject()
             } label: {
-                Text("Deny")
+                Text(provider.approvalNegativeLabel)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(theme.accentMuted)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.1))
+                    .background(theme.rowBackground)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -361,12 +460,12 @@ struct InlineApprovalButtons: View {
             Button {
                 onApprove()
             } label: {
-                Text("Allow")
+                Text(provider.approvalPositiveLabel)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.black)
+                    .foregroundColor(.white)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.9))
+                    .background(theme.accentGradient)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)

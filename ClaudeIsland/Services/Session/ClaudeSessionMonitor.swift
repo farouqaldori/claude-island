@@ -68,10 +68,17 @@ class ClaudeSessionMonitor: ObservableObject {
                 }
             }
         )
+
+        CodexSessionMonitor.shared.start { event in
+            Task {
+                await SessionStore.shared.process(.codexReceived(event))
+            }
+        }
     }
 
     func stopMonitoring() {
         HookSocketServer.shared.stop()
+        CodexSessionMonitor.shared.stop()
     }
 
     // MARK: - Permission Handling
@@ -83,11 +90,18 @@ class ClaudeSessionMonitor: ObservableObject {
                 return
             }
 
-            HookSocketServer.shared.respondToPermission(
-                toolUseId: permission.toolUseId,
-                decision: "allow"
-            )
+            let actionSent: Bool
+            if permission.provider == .claude {
+                HookSocketServer.shared.respondToPermission(
+                    toolUseId: permission.toolUseId,
+                    decision: "allow"
+                )
+                actionSent = true
+            } else {
+                actionSent = await approveCodexPermission(for: session)
+            }
 
+            guard actionSent else { return }
             await SessionStore.shared.process(
                 .permissionApproved(sessionId: sessionId, toolUseId: permission.toolUseId)
             )
@@ -101,12 +115,19 @@ class ClaudeSessionMonitor: ObservableObject {
                 return
             }
 
-            HookSocketServer.shared.respondToPermission(
-                toolUseId: permission.toolUseId,
-                decision: "deny",
-                reason: reason
-            )
+            let actionSent: Bool
+            if permission.provider == .claude {
+                HookSocketServer.shared.respondToPermission(
+                    toolUseId: permission.toolUseId,
+                    decision: "deny",
+                    reason: reason
+                )
+                actionSent = true
+            } else {
+                actionSent = await denyCodexPermission(for: session, reason: reason)
+            }
 
+            guard actionSent else { return }
             await SessionStore.shared.process(
                 .permissionDenied(sessionId: sessionId, toolUseId: permission.toolUseId, reason: reason)
             )
@@ -134,6 +155,37 @@ class ClaudeSessionMonitor: ObservableObject {
         Task {
             await SessionStore.shared.process(.loadHistory(sessionId: sessionId, cwd: cwd))
         }
+    }
+}
+
+// MARK: - Codex approval helpers
+
+private extension ClaudeSessionMonitor {
+    func resolveCodexTarget(for session: SessionState) async -> TmuxTarget? {
+        if let byPid = session.pid,
+           let target = await TmuxController.shared.findTmuxTarget(forClaudePid: byPid) {
+            return target
+        }
+        return await TmuxController.shared.findTmuxTarget(forWorkingDirectory: session.cwd)
+    }
+
+    func approveCodexPermission(for session: SessionState) async -> Bool {
+        guard session.provider == .codex else { return false }
+        guard let target = await resolveCodexTarget(for: session) else {
+            return false
+        }
+        // Codex approval prompt accepts y + Enter for single approval.
+        return await TmuxController.shared.sendMessage("y", to: target)
+    }
+
+    func denyCodexPermission(for session: SessionState, reason: String?) async -> Bool {
+        guard session.provider == .codex else { return false }
+        guard let target = await resolveCodexTarget(for: session) else {
+            return false
+        }
+        // Keep Codex denial explicit and deterministic (n + Enter), avoid fallback text injection.
+        _ = reason
+        return await TmuxController.shared.sendMessage("n", to: target)
     }
 }
 

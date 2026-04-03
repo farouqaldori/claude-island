@@ -8,13 +8,19 @@
 import Foundation
 
 struct HookInstaller {
+    private static let hookScriptName = "opennotch-agent-state.py"
+    private static let legacyHookScriptName = "claude-island-state.py"
+    private static let currentHookResourceName = "opennotch-agent-state"
+    private static let legacyHookCommandNeedle = "claude-island-state.py"
+    private static let currentHookCommandNeedle = "opennotch-agent-state.py"
 
     /// Install hook script and update settings.json on app launch
     static func installIfNeeded() {
         let claudeDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude")
         let hooksDir = claudeDir.appendingPathComponent("hooks")
-        let pythonScript = hooksDir.appendingPathComponent("claude-island-state.py")
+        let pythonScript = hooksDir.appendingPathComponent(hookScriptName)
+        let legacyPythonScript = hooksDir.appendingPathComponent(legacyHookScriptName)
         let settings = claudeDir.appendingPathComponent("settings.json")
 
         try? FileManager.default.createDirectory(
@@ -22,7 +28,8 @@ struct HookInstaller {
             withIntermediateDirectories: true
         )
 
-        if let bundled = Bundle.main.url(forResource: "claude-island-state", withExtension: "py") {
+        if let bundled = Bundle.main.url(forResource: currentHookResourceName, withExtension: "py") {
+            try? FileManager.default.removeItem(at: legacyPythonScript)
             try? FileManager.default.removeItem(at: pythonScript)
             try? FileManager.default.copyItem(at: bundled, to: pythonScript)
             try? FileManager.default.setAttributes(
@@ -42,7 +49,7 @@ struct HookInstaller {
         }
 
         let python = detectPython()
-        let command = "\(python) ~/.claude/hooks/claude-island-state.py"
+        let command = "\(python) ~/.claude/hooks/\(hookScriptName)"
         let hookEntry: [[String: Any]] = [["type": "command", "command": command]]
         let hookEntryWithTimeout: [[String: Any]] = [["type": "command", "command": command, "timeout": 86400]]
         let withMatcher: [[String: Any]] = [["matcher": "*", "hooks": hookEntry]]
@@ -70,11 +77,29 @@ struct HookInstaller {
 
         for (event, config) in hookEvents {
             if var existingEvent = hooks[event] as? [[String: Any]] {
+                // Remove legacy/current app hook entries, then add the current one exactly once.
+                existingEvent = existingEvent.compactMap { entry in
+                    var mutableEntry = entry
+                    guard var entryHooks = mutableEntry["hooks"] as? [[String: Any]] else { return mutableEntry }
+
+                    entryHooks.removeAll { h in
+                        let cmd = h["command"] as? String ?? ""
+                        return isAppHookCommand(cmd)
+                    }
+
+                    if entryHooks.isEmpty {
+                        return nil
+                    }
+
+                    mutableEntry["hooks"] = entryHooks
+                    return mutableEntry
+                }
+
                 let hasOurHook = existingEvent.contains { entry in
                     if let entryHooks = entry["hooks"] as? [[String: Any]] {
                         return entryHooks.contains { h in
                             let cmd = h["command"] as? String ?? ""
-                            return cmd.contains("claude-island-state.py")
+                            return cmd.contains(currentHookCommandNeedle)
                         }
                     }
                     return false
@@ -116,7 +141,7 @@ struct HookInstaller {
                     if let entryHooks = entry["hooks"] as? [[String: Any]] {
                         for hook in entryHooks {
                             if let cmd = hook["command"] as? String,
-                               cmd.contains("claude-island-state.py") {
+                               isAppHookCommand(cmd) {
                                 return true
                             }
                         }
@@ -132,10 +157,12 @@ struct HookInstaller {
         let claudeDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude")
         let hooksDir = claudeDir.appendingPathComponent("hooks")
-        let pythonScript = hooksDir.appendingPathComponent("claude-island-state.py")
+        let pythonScript = hooksDir.appendingPathComponent(hookScriptName)
+        let legacyPythonScript = hooksDir.appendingPathComponent(legacyHookScriptName)
         let settings = claudeDir.appendingPathComponent("settings.json")
 
         try? FileManager.default.removeItem(at: pythonScript)
+        try? FileManager.default.removeItem(at: legacyPythonScript)
 
         guard let data = try? Data(contentsOf: settings),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -149,7 +176,7 @@ struct HookInstaller {
                     if let entryHooks = entry["hooks"] as? [[String: Any]] {
                         return entryHooks.contains { hook in
                             let cmd = hook["command"] as? String ?? ""
-                            return cmd.contains("claude-island-state.py")
+                            return isAppHookCommand(cmd)
                         }
                     }
                     return false
@@ -193,5 +220,9 @@ struct HookInstaller {
         } catch {}
 
         return "python"
+    }
+
+    private static func isAppHookCommand(_ command: String) -> Bool {
+        command.contains(currentHookCommandNeedle) || command.contains(legacyHookCommandNeedle)
     }
 }

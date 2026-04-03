@@ -41,23 +41,21 @@ struct ProcessResult: Sendable {
 
 /// Protocol for executing shell commands (enables testing)
 protocol ProcessExecuting: Sendable {
-    func run(_ executable: String, arguments: [String]) async throws -> String
-    func runWithResult(_ executable: String, arguments: [String]) async -> Result<ProcessResult, ProcessExecutorError>
-    func runSync(_ executable: String, arguments: [String]) -> Result<String, ProcessExecutorError>
+    nonisolated func run(_ executable: String, arguments: [String]) async throws -> String
+    nonisolated func runWithResult(_ executable: String, arguments: [String]) async -> Result<ProcessResult, ProcessExecutorError>
+    nonisolated func runSync(_ executable: String, arguments: [String]) -> Result<String, ProcessExecutorError>
 }
 
 /// Default implementation using Foundation.Process
-actor ProcessExecutor: ProcessExecuting {
-    /// Shared instance (nonisolated(unsafe) required for actor init in static context)
-    nonisolated(unsafe) static let shared = ProcessExecutor()
+struct ProcessExecutor: ProcessExecuting {
+    /// Shared instance
+    nonisolated static let shared = ProcessExecutor()
 
-    /// Logger for process execution (nonisolated static for cross-context access)
+    /// Logger for process execution (shared across calls)
     nonisolated static let logger = Logger(subsystem: "com.claudeisland", category: "ProcessExecutor")
 
-    private init() {}
-
     /// Run a command asynchronously and return output (throws on failure)
-    func run(_ executable: String, arguments: [String]) async throws -> String {
+    nonisolated func run(_ executable: String, arguments: [String]) async throws -> String {
         let result = await runWithResult(executable, arguments: arguments)
         switch result {
         case .success(let processResult):
@@ -68,7 +66,7 @@ actor ProcessExecutor: ProcessExecuting {
     }
 
     /// Run a command asynchronously and return a full Result with exit code and stderr
-    func runWithResult(_ executable: String, arguments: [String]) async -> Result<ProcessResult, ProcessExecutorError> {
+    nonisolated func runWithResult(_ executable: String, arguments: [String]) async -> Result<ProcessResult, ProcessExecutorError> {
         await withCheckedContinuation { continuation in
             let process = Process()
             let stdoutPipe = Pipe()
@@ -171,7 +169,7 @@ actor ProcessExecutor: ProcessExecuting {
 extension ProcessExecutor {
     /// Run a command and return output, returning nil only if the command itself fails to execute
     /// (as opposed to non-zero exit codes which may still have useful output)
-    func runOrNil(_ executable: String, arguments: [String]) async -> String? {
+    nonisolated func runOrNil(_ executable: String, arguments: [String]) async -> String? {
         let result = await runWithResult(executable, arguments: arguments)
         switch result {
         case .success(let processResult):

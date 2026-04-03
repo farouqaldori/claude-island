@@ -16,7 +16,8 @@ struct TerminalColors {
     static let magenta = Color(red: 0.8, green: 0.4, blue: 0.8)
     static let dim = Color.white.opacity(0.4)
     static let dimmer = Color.white.opacity(0.2)
-    static let prompt = Color(red: 0.85, green: 0.47, blue: 0.34)  // #d97857
+    static let prompt = AgentProvider.claude.theme.accent
+    static let codexBlue = AgentProvider.codex.theme.accent
     static let background = Color.white.opacity(0.05)
     static let backgroundHover = Color.white.opacity(0.1)
 }

@@ -28,10 +28,41 @@ struct NotchView: View {
     @State private var isBouncing: Bool = false
 
     @Namespace private var activityNamespace
+    private let codexLogoName = "CodexLogo"
 
     /// Whether any Claude session is currently processing or compacting
     private var isAnyProcessing: Bool {
         sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
+    }
+
+    private var processingProviders: Set<AgentProvider> {
+        Set(
+            sessionMonitor.instances
+                .filter { $0.phase == .processing || $0.phase == .compacting }
+                .map(\.provider)
+        )
+    }
+
+    private var pendingProviders: Set<AgentProvider> {
+        Set(
+            sessionMonitor.instances
+                .filter { $0.phase.isWaitingForApproval }
+                .map(\.provider)
+        )
+    }
+
+    private var waitingForInputProviders: Set<AgentProvider> {
+        Set(
+            sessionMonitor.instances
+                .filter { $0.phase == .waitingForInput }
+                .map(\.provider)
+        )
+    }
+
+    private var activeProvidersInClosedState: Set<AgentProvider> {
+        processingProviders
+            .union(pendingProviders)
+            .union(waitingForInputProviders)
     }
 
     /// Whether any Claude session has a pending permission request
@@ -71,7 +102,7 @@ struct NotchView: View {
         // Expand for processing activity
         if activityCoordinator.expandingActivity.show {
             switch activityCoordinator.expandingActivity.type {
-            case .claude:
+            case .claude, .codex, .mixed:
                 let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
                 return baseWidth + permissionIndicatorWidth
             case .none:
@@ -210,7 +241,8 @@ struct NotchView: View {
     // MARK: - Notch Layout
 
     private var isProcessing: Bool {
-        activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
+        activityCoordinator.expandingActivity.show
+            && activityCoordinator.expandingActivity.type != .none
     }
 
     /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
@@ -249,12 +281,22 @@ struct NotchView: View {
             // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
             if showClosedActivity {
                 HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
-                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+                    if activeProvidersInClosedState.contains(.codex) {
+                        Image(codexLogoName)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                    }
+
+                    if activeProvidersInClosedState.contains(.claude) {
+                        ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
+                            .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+                    }
 
                     // Permission indicator only (amber) - waiting for input shows checkmark on right
                     if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                        PermissionIndicatorIcon(size: 14, color: TerminalColors.amber)
                             .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
                     }
                 }
@@ -373,8 +415,17 @@ struct NotchView: View {
 
     private func handleProcessingChange() {
         if isAnyProcessing || hasPendingPermission {
-            // Show claude activity when processing or waiting for permission
-            activityCoordinator.showActivity(type: .claude)
+            let activeProviders = activeProvidersInClosedState
+            let activityType: NotchActivityType
+            if activeProviders.count > 1 {
+                activityType = .mixed
+            } else if activeProviders.contains(.codex) {
+                activityType = .codex
+            } else {
+                activityType = .claude
+            }
+
+            activityCoordinator.showActivity(type: activityType)
             isVisible = true
         } else if hasWaitingForInput {
             // Keep visible for waiting-for-input but hide the processing spinner
@@ -457,8 +508,8 @@ struct NotchView: View {
                 Task {
                     let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
                     if shouldPlaySound {
-                        await MainActor.run {
-                            NSSound(named: soundName)?.play()
+                        await MainActor.run { @MainActor in
+                            _ = NSSound(named: soundName)?.play()
                         }
                     }
                 }

@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
     private var screenObserver: ScreenObserver?
     private var updateCheckTimer: Timer?
+    private var isMixpanelInitialized = false
 
     static var shared: AppDelegate?
     let updater: SPUUpdater
@@ -42,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Mixpanel.initialize(token: "49814c1436104ed108f3fc4735228496")
+        isMixpanelInitialized = true
 
         let distinctId = getOrCreateDistinctId()
         Mixpanel.mainInstance().identify(distinctId: distinctId)
@@ -65,7 +67,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ])
 
         Mixpanel.mainInstance().track(event: "App Launched")
-        Mixpanel.mainInstance().flush()
 
         HookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -92,7 +93,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        Mixpanel.mainInstance().flush()
         updateCheckTimer?.invalidate()
         screenObserver = nil
     }
@@ -175,7 +175,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func ensureSingleInstance() -> Bool {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.farouqaldori.ClaudeIsland"
+        #if !DEBUG
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.zabrodsk.OpenNotchAgent"
         let runningApps = NSWorkspace.shared.runningApplications.filter {
             $0.bundleIdentifier == bundleID
         }
@@ -188,5 +189,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         return true
+        #else
+        // Allow multiple instances while debugging from Xcode to avoid immediate auto-quit.
+        return true
+        #endif
     }
 }

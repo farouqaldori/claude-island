@@ -10,7 +10,7 @@ import Foundation
 /// Registry of known terminal application names and bundle identifiers
 struct TerminalAppRegistry: Sendable {
     /// Terminal app names for process matching
-    static let appNames: Set<String> = [
+    nonisolated static let appNames: Set<String> = [
         "Terminal",
         "iTerm2",
         "iTerm",
@@ -35,7 +35,7 @@ struct TerminalAppRegistry: Sendable {
     ]
 
     /// Bundle identifiers for terminal apps (for window enumeration)
-    static let bundleIdentifiers: Set<String> = [
+    nonisolated static let bundleIdentifiers: Set<String> = [
         "com.apple.Terminal",
         "com.googlecode.iterm2",
         "com.mitchellh.ghostty",
@@ -53,7 +53,7 @@ struct TerminalAppRegistry: Sendable {
     ]
 
     /// Check if an app name or command path is a known terminal
-    static func isTerminal(_ appNameOrCommand: String) -> Bool {
+    nonisolated static func isTerminal(_ appNameOrCommand: String) -> Bool {
         let lower = appNameOrCommand.lowercased()
 
         // Check if any known app name is contained in the command (case-insensitive)
@@ -68,7 +68,7 @@ struct TerminalAppRegistry: Sendable {
     }
 
     /// Check if a bundle identifier is a known terminal
-    static func isTerminalBundle(_ bundleId: String) -> Bool {
+    nonisolated static func isTerminalBundle(_ bundleId: String) -> Bool {
         bundleIdentifiers.contains(bundleId)
     }
 }

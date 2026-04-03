@@ -10,6 +10,7 @@ import Foundation
 
 /// Permission context for tools waiting for approval
 struct PermissionContext: Sendable {
+    let provider: AgentProvider
     let toolUseId: String
     let toolName: String
     let toolInput: [String: AnyCodable]?
@@ -42,6 +43,7 @@ struct PermissionContext: Sendable {
 extension PermissionContext: Equatable {
     nonisolated static func == (lhs: PermissionContext, rhs: PermissionContext) -> Bool {
         // Compare by identity fields only (AnyCodable doesn't conform to Equatable)
+        lhs.provider == rhs.provider &&
         lhs.toolUseId == rhs.toolUseId &&
         lhs.toolName == rhs.toolName &&
         lhs.receivedAt == rhs.receivedAt
@@ -84,6 +86,8 @@ enum SessionPhase: Sendable {
         // Idle transitions
         case (.idle, .processing):
             return true
+        case (.idle, .waitingForInput):
+            return true  // Snapshot-based monitors can infer "awaiting user" directly
         case (.idle, .waitingForApproval):
             return true  // Direct permission request on idle session
         case (.idle, .compacting):
@@ -102,6 +106,8 @@ enum SessionPhase: Sendable {
         // WaitingForInput transitions
         case (.waitingForInput, .processing):
             return true
+        case (.waitingForInput, .waitingForApproval):
+            return true  // Tool can request approval while awaiting user
         case (.waitingForInput, .idle):
             return true  // Can become idle
         case (.waitingForInput, .compacting):

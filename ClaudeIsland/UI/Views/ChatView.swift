@@ -51,6 +51,10 @@ struct ChatView: View {
         session.phase.approvalToolName
     }
 
+    private var theme: ProviderTheme {
+        session.provider.theme
+    }
+
     
     var body: some View {
         ZStack {
@@ -69,7 +73,7 @@ struct ChatView: View {
 
                 // Approval bar, interactive prompt, or Input bar
                 if let tool = approvalTool {
-                    if tool == "AskUserQuestion" {
+                    if isInteractiveQuestionTool(tool) {
                         // Interactive tools - show prompt to answer in terminal
                         interactivePromptBar
                             .transition(.asymmetric(
@@ -282,7 +286,7 @@ struct ChatView: View {
 
                     // Processing indicator at bottom (first due to flip)
                     if isProcessing {
-                        ProcessingIndicatorView(turnId: lastUserMessageId)
+                        ProcessingIndicatorView(provider: session.provider, turnId: lastUserMessageId)
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
                             .transition(.asymmetric(
@@ -292,7 +296,7 @@ struct ChatView: View {
                     }
 
                     ForEach(history.reversed()) { item in
-                        MessageItemView(item: item, sessionId: sessionId)
+                        MessageItemView(item: item, sessionId: sessionId, provider: session.provider)
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
                             .transition(.asymmetric(
@@ -333,7 +337,7 @@ struct ChatView: View {
             // New messages indicator overlay
             .overlay(alignment: .bottom) {
                 if isAutoscrollPaused && newMessageCount > 0 {
-                    NewMessagesIndicator(count: newMessageCount) {
+                    NewMessagesIndicator(provider: session.provider, count: newMessageCount) {
                         withAnimation(.easeOut(duration: 0.3)) {
                             // In inverted scroll, use .bottom anchor to scroll to the visual bottom
                             proxy.scrollTo("bottom", anchor: .bottom)
@@ -355,12 +359,12 @@ struct ChatView: View {
 
     /// Can send messages only if session is in tmux
     private var canSendMessages: Bool {
-        session.isInTmux && session.tty != nil
+        session.isInTmux
     }
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+            TextField(canSendMessages ? messagePlaceholder : disabledPlaceholder, text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
@@ -385,7 +389,7 @@ struct ChatView: View {
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 28))
-                    .foregroundColor(!canSendMessages || inputText.isEmpty ? .white.opacity(0.2) : .white.opacity(0.9))
+                    .foregroundColor(!canSendMessages || inputText.isEmpty ? .white.opacity(0.2) : theme.accent)
             }
             .buttonStyle(.plain)
             .disabled(!canSendMessages || inputText.isEmpty)
@@ -410,6 +414,7 @@ struct ChatView: View {
 
     private func approvalBar(tool: String) -> some View {
         ChatApprovalBar(
+            provider: session.provider,
             tool: tool,
             toolInput: session.pendingToolInput,
             onApprove: { approvePermission() },
@@ -423,8 +428,26 @@ struct ChatView: View {
     private var interactivePromptBar: some View {
         ChatInteractivePromptBar(
             isInTmux: session.isInTmux,
+            provider: session.provider,
             onGoToTerminal: { focusTerminal() }
         )
+    }
+
+    private var messagePlaceholder: String {
+        session.provider == .codex ? "Message Codex..." : "Message Claude..."
+    }
+
+    private var disabledPlaceholder: String {
+        session.provider == .codex
+            ? "Open Codex in tmux to enable messaging"
+            : "Open Claude Code in tmux to enable messaging"
+    }
+
+    private func isInteractiveQuestionTool(_ tool: String) -> Bool {
+        let normalized = tool.lowercased()
+        return normalized == "askuserquestion"
+            || normalized == "ask_user_question"
+            || normalized == "ask_user"
     }
 
     // MARK: - Autoscroll Management
@@ -480,11 +503,23 @@ struct ChatView: View {
 
     private func sendToSession(_ text: String) async {
         guard session.isInTmux else { return }
-        guard let tty = session.tty else { return }
-
-        if let target = await findTmuxTarget(tty: tty) {
+        if let target = await resolveMessageTarget() {
             _ = await ToolApprovalHandler.shared.sendMessage(text, to: target)
         }
+    }
+
+    private func resolveMessageTarget() async -> TmuxTarget? {
+        if let tty = session.tty,
+           let target = await findTmuxTarget(tty: tty) {
+            return target
+        }
+
+        if let pid = session.pid,
+           let target = await TmuxController.shared.findTmuxTarget(forClaudePid: pid) {
+            return target
+        }
+
+        return await TmuxController.shared.findTmuxTarget(forWorkingDirectory: session.cwd)
     }
 
     private func findTmuxTarget(tty: String) async -> TmuxTarget? {
@@ -523,13 +558,14 @@ struct ChatView: View {
 struct MessageItemView: View {
     let item: ChatHistoryItem
     let sessionId: String
+    let provider: AgentProvider
 
     var body: some View {
         switch item.type {
         case .user(let text):
             UserMessageView(text: text)
         case .assistant(let text):
-            AssistantMessageView(text: text)
+            AssistantMessageView(provider: provider, text: text)
         case .toolCall(let tool):
             ToolCallView(tool: tool, sessionId: sessionId)
         case .thinking(let text):
@@ -563,13 +599,14 @@ struct UserMessageView: View {
 // MARK: - Assistant Message
 
 struct AssistantMessageView: View {
+    let provider: AgentProvider
     let text: String
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             // White dot indicator
             Circle()
-                .fill(Color.white.opacity(0.6))
+                .fill(provider.theme.accentMuted)
                 .frame(width: 6, height: 6)
                 .padding(.top, 5)
 
@@ -583,15 +620,18 @@ struct AssistantMessageView: View {
 // MARK: - Processing Indicator
 
 struct ProcessingIndicatorView: View {
+    let provider: AgentProvider
     private let baseTexts = ["Processing", "Working"]
-    private let color = Color(red: 0.85, green: 0.47, blue: 0.34) // Claude orange
+    private let color: Color
     private let baseText: String
 
     @State private var dotCount: Int = 1
     private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
     /// Use a turnId to select text consistently per user turn
-    init(turnId: String = "") {
+    init(provider: AgentProvider, turnId: String = "") {
+        self.provider = provider
+        self.color = provider.theme.accent
         // Use hash of turnId to pick base text consistently for this turn
         let index = abs(turnId.hashValue) % baseTexts.count
         baseText = baseTexts[index]
@@ -603,7 +643,7 @@ struct ProcessingIndicatorView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
-            ProcessingSpinner()
+            ProcessingSpinner(color: color)
                 .frame(width: 6)
 
             Text(baseText + dots)
@@ -984,6 +1024,7 @@ struct InterruptedMessageView: View {
 /// Bar for interactive tools like AskUserQuestion that need terminal input
 struct ChatInteractivePromptBar: View {
     let isInTmux: Bool
+    let provider: AgentProvider
     let onGoToTerminal: () -> Void
 
     @State private var showContent = false
@@ -996,7 +1037,7 @@ struct ChatInteractivePromptBar: View {
                 Text(MCPToolFormatter.formatToolName("AskUserQuestion"))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(TerminalColors.amber)
-                Text("Claude Code needs your input")
+                Text(provider == .codex ? "Codex needs your input" : "Claude Code needs your input")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.5))
                     .lineLimit(1)
@@ -1047,6 +1088,7 @@ struct ChatInteractivePromptBar: View {
 
 /// Approval bar for the chat view with animated buttons
 struct ChatApprovalBar: View {
+    let provider: AgentProvider
     let tool: String
     let toolInput: String?
     let onApprove: () -> Void
@@ -1055,6 +1097,7 @@ struct ChatApprovalBar: View {
     @State private var showContent = false
     @State private var showAllowButton = false
     @State private var showDenyButton = false
+    private var theme: ProviderTheme { provider.theme }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1079,12 +1122,12 @@ struct ChatApprovalBar: View {
             Button {
                 onDeny()
             } label: {
-                Text("Deny")
+                Text(provider.approvalNegativeLabel)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(theme.accentMuted)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.1))
+                    .background(theme.rowBackground)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -1095,12 +1138,12 @@ struct ChatApprovalBar: View {
             Button {
                 onApprove()
             } label: {
-                Text("Allow")
+                Text(provider.approvalPositiveLabel)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.black)
+                    .foregroundColor(.white)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.95))
+                    .background(theme.accentGradient)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -1129,6 +1172,7 @@ struct ChatApprovalBar: View {
 
 /// Floating indicator showing count of new messages when user has scrolled up
 struct NewMessagesIndicator: View {
+    let provider: AgentProvider
     let count: Int
     let onTap: () -> Void
 
@@ -1148,7 +1192,7 @@ struct NewMessagesIndicator: View {
             .padding(.vertical, 8)
             .background(
                 Capsule()
-                    .fill(Color(red: 0.85, green: 0.47, blue: 0.34)) // Claude orange
+                    .fill(provider.theme.accentGradient)
                     .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
             )
             .scaleEffect(isHovering ? 1.05 : 1.0)
