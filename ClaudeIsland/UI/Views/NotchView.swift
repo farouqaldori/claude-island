@@ -23,6 +23,7 @@ struct NotchView: View {
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
     @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
+    @State private var acknowledgedSessionIds: Set<String> = []          // sessions user has seen (clicked/opened)
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
@@ -32,6 +33,18 @@ struct NotchView: View {
     /// Whether there are any active Claude sessions
     private var hasSessions: Bool {
         !sessionMonitor.instances.isEmpty
+    }
+
+    /// Sessions that finished (waitingForInput) but user hasn't acknowledged yet
+    private var hasUnacknowledgedDone: Bool {
+        sessionMonitor.instances.contains {
+            $0.phase == .waitingForInput && !acknowledgedSessionIds.contains($0.stableId)
+        }
+    }
+
+    /// Minimal indicator mode: sessions exist, no ongoing activity, notch is closed
+    private var isMinimalMode: Bool {
+        hasSessions && !showClosedActivity && viewModel.status == .closed
     }
 
     /// Whether any Claude session is currently processing or compacting
@@ -188,6 +201,23 @@ struct NotchView: View {
                             viewModel.notchOpen(reason: .click)
                         }
                     }
+                    .scaleEffect(
+                        x: isMinimalMode ? 0.65 : 1.0,
+                        y: isMinimalMode ? 0.22 : 1.0,
+                        anchor: .top
+                    )
+                    .opacity(isMinimalMode ? (hasUnacknowledgedDone ? 0.85 : 0.55) : 1.0)
+                    .overlay(alignment: .top) {
+                        // Subtle green glow when a task finished but user hasn't opened yet
+                        if isMinimalMode && hasUnacknowledgedDone {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(TerminalColors.green.opacity(0.5))
+                                .frame(width: closedNotchSize.width * 0.65 * 0.5, height: 2)
+                                .blur(radius: 2)
+                        }
+                    }
+                    .animation(.spring(response: 0.45, dampingFraction: 0.9), value: isMinimalMode)
+                    .animation(.easeInOut(duration: 0.3), value: hasUnacknowledgedDone)
             }
         }
         .opacity(isVisible ? 1 : 0)
@@ -413,9 +443,13 @@ struct NotchView: View {
         switch newStatus {
         case .opened, .popping:
             isVisible = true
-            // Clear waiting-for-input timestamps only when manually opened (user acknowledged)
+            // Mark done sessions as acknowledged and clear timestamps when user opens manually
             if viewModel.openReason == .click || viewModel.openReason == .hover {
                 waitingForInputTimestamps.removeAll()
+                let doneIds = sessionMonitor.instances
+                    .filter { $0.phase == .waitingForInput }
+                    .map { $0.stableId }
+                acknowledgedSessionIds.formUnion(doneIds)
             }
         case .closed:
             // Don't hide on non-notched devices - users need a visible target
@@ -449,6 +483,12 @@ struct NotchView: View {
         let waitingForInputSessions = instances.filter { $0.phase == .waitingForInput }
         let currentIds = Set(waitingForInputSessions.map { $0.stableId })
         let newWaitingIds = currentIds.subtracting(previousWaitingForInputIds)
+
+        // When a session leaves waitingForInput (starts processing again), clear its acknowledged flag
+        let noLongerWaiting = previousWaitingForInputIds.subtracting(currentIds)
+        for staleId in noLongerWaiting {
+            acknowledgedSessionIds.remove(staleId)
+        }
 
         // Track timestamps for newly waiting sessions
         let now = Date()
