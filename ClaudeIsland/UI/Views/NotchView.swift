@@ -29,6 +29,11 @@ struct NotchView: View {
 
     @Namespace private var activityNamespace
 
+    /// Whether there are any active Claude sessions
+    private var hasSessions: Bool {
+        !sessionMonitor.instances.isEmpty
+    }
+
     /// Whether any Claude session is currently processing or compacting
     private var isAnyProcessing: Bool {
         sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
@@ -194,6 +199,7 @@ struct NotchView: View {
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
             }
+            viewModel.hasSessions = !sessionMonitor.instances.isEmpty
         }
         .onChange(of: viewModel.status) { oldStatus, newStatus in
             handleStatusChange(from: oldStatus, to: newStatus)
@@ -202,6 +208,7 @@ struct NotchView: View {
             handlePendingSessionsChange(sessions)
         }
         .onChange(of: sessionMonitor.instances) { _, instances in
+            viewModel.hasSessions = !instances.isEmpty
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
@@ -384,11 +391,17 @@ struct NotchView: View {
             // Hide activity when done
             activityCoordinator.hideActivity()
 
+            // Keep visible as long as sessions exist — notch stays accessible
+            if hasSessions {
+                isVisible = true
+                return
+            }
+
             // Delay hiding the notch until animation completes
             // Don't hide on non-notched devices - users need a visible target
             if viewModel.status == .closed && viewModel.hasPhysicalNotch {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && viewModel.status == .closed {
+                    if !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !hasSessions && viewModel.status == .closed {
                         isVisible = false
                     }
                 }
@@ -409,7 +422,10 @@ struct NotchView: View {
             guard viewModel.hasPhysicalNotch else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !activityCoordinator.expandingActivity.show {
-                    isVisible = false
+                    // Only hide if no sessions remain
+                    if !hasSessions {
+                        isVisible = false
+                    }
                 }
             }
         }

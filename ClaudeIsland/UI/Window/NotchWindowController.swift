@@ -62,23 +62,23 @@ class NotchWindowController: NSWindowController {
         notchWindow.setFrame(windowFrame, display: true)
 
         // Dynamically toggle mouse event handling based on notch state:
-        // - Closed: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
+        // - Closed, no sessions: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
+        // - Closed, has sessions: ignoresMouseEvents = false (visible notch is interactive)
         // - Opened: ignoresMouseEvents = false (buttons inside panel work)
         viewModel.$status
+            .combineLatest(viewModel.$hasSessions)
             .receive(on: DispatchQueue.main)
-            .sink { [weak notchWindow, weak viewModel] status in
+            .sink { [weak notchWindow, weak viewModel] (status, hasSessions) in
                 switch status {
                 case .opened:
-                    // Accept mouse events when opened so buttons work
                     notchWindow?.ignoresMouseEvents = false
-                    // Don't steal focus when opened by notification (task finished)
                     if viewModel?.openReason != .notification {
                         NSApp.activate(ignoringOtherApps: false)
                         notchWindow?.makeKey()
                     }
                 case .closed, .popping:
-                    // Ignore mouse events when closed so clicks pass through
-                    notchWindow?.ignoresMouseEvents = true
+                    // Accept events when sessions exist so the notch remains clickable
+                    notchWindow?.ignoresMouseEvents = !hasSessions
                 }
             }
             .store(in: &cancellables)

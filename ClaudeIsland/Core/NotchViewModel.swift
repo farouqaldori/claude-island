@@ -45,6 +45,7 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
+    @Published var hasSessions: Bool = false
 
     // MARK: - Dependencies
 
