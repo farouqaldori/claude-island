@@ -26,6 +26,7 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
+    @State private var dragOffset: CGFloat = 0
 
     @Namespace private var activityNamespace
 
@@ -183,6 +184,20 @@ struct NotchView: View {
                             viewModel.notchOpen(reason: .click)
                         }
                     }
+                    .gesture(
+                        DragGesture(minimumDistance: 5)
+                            .onChanged { value in
+                                guard viewModel.status != .opened else { return }
+                                let maxOffset = (viewModel.screenRect.width / 2) - (closedContentWidth / 2) - 20
+                                let newOffset = dragOffset + value.translation.width
+                                viewModel.horizontalOffset = min(max(newOffset, -maxOffset), maxOffset)
+                            }
+                            .onEnded { _ in
+                                guard viewModel.status != .opened else { return }
+                                dragOffset = viewModel.horizontalOffset
+                            }
+                    )
+                    .offset(x: viewModel.horizontalOffset)
             }
         }
         .opacity(isVisible ? 1 : 0)

@@ -45,6 +45,7 @@ class NotchViewModel: ObservableObject {
     @Published var openReason: NotchOpenReason = .unknown
     @Published var contentType: NotchContentType = .instances
     @Published var isHovering: Bool = false
+    @Published var horizontalOffset: CGFloat = 0
 
     // MARK: - Dependencies
 
@@ -147,8 +148,9 @@ class NotchViewModel: ObservableObject {
     private var currentChatSession: SessionState?
 
     private func handleMouseMove(_ location: CGPoint) {
-        let inNotch = geometry.isPointInNotch(location)
-        let inOpened = status == .opened && geometry.isPointInOpenedPanel(location, size: openedSize)
+        let adjusted = CGPoint(x: location.x - horizontalOffset, y: location.y)
+        let inNotch = geometry.isPointInNotch(adjusted)
+        let inOpened = status == .opened && geometry.isPointInOpenedPanel(adjusted, size: openedSize)
 
         let newHovering = inNotch || inOpened
 
@@ -174,21 +176,22 @@ class NotchViewModel: ObservableObject {
 
     private func handleMouseDown() {
         let location = NSEvent.mouseLocation
+        let adjusted = CGPoint(x: location.x - horizontalOffset, y: location.y)
 
         switch status {
         case .opened:
-            if geometry.isPointOutsidePanel(location, size: openedSize) {
+            if geometry.isPointOutsidePanel(adjusted, size: openedSize) {
                 notchClose()
                 // Re-post the click so it reaches the window/app behind us
                 repostClickAt(location)
-            } else if geometry.notchScreenRect.contains(location) {
+            } else if geometry.notchScreenRect.contains(adjusted) {
                 // Clicking notch while opened - only close if NOT in chat mode
                 if !isInChatMode {
                     notchClose()
                 }
             }
         case .closed, .popping:
-            if geometry.isPointInNotch(location) {
+            if geometry.isPointInNotch(adjusted) {
                 notchOpen(reason: .click)
             }
         }
