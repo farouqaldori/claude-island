@@ -6,6 +6,17 @@
 //
 
 import Foundation
+import CryptoKit
+
+/// Produces a stable hex hash string that is consistent across app launches.
+/// Swift's hashValue is randomized per process, making it unsuitable for identifiers.
+enum StableHash {
+    static func hash(_ string: Substring) -> String {
+        let data = Data(string.utf8)
+        let digest = SHA256.hash(data: data)
+        return digest.compactMap { String(format: "%02x", $0) }.prefix(8).joined()
+    }
+}
 
 struct ChatMessage: Identifiable, Equatable {
     let id: String
@@ -43,11 +54,11 @@ enum MessageBlock: Equatable, Identifiable {
     var id: String {
         switch self {
         case .text(let text):
-            return "text-\(text.prefix(20).hashValue)"
+            return "text-\(StableHash.hash(text.prefix(100)))"
         case .toolUse(let block):
             return "tool-\(block.id)"
         case .thinking(let text):
-            return "thinking-\(text.prefix(20).hashValue)"
+            return "thinking-\(StableHash.hash(text.prefix(100)))"
         case .interrupted:
             return "interrupted"
         }

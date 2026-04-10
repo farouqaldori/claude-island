@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build Claude Island for release
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -26,13 +26,17 @@ xcodebuild archive \
     -destination "generic/platform=macOS" \
     ENABLE_HARDENED_RUNTIME=YES \
     CODE_SIGN_STYLE=Automatic \
-    | xcpretty || xcodebuild archive \
-    -scheme ClaudeIsland \
-    -configuration Release \
-    -archivePath "$ARCHIVE_PATH" \
-    -destination "generic/platform=macOS" \
-    ENABLE_HARDENED_RUNTIME=YES \
-    CODE_SIGN_STYLE=Automatic
+    2>&1 | xcpretty || {
+    echo "ERROR: Archive failed. Re-running with full output..."
+    xcodebuild archive \
+        -scheme ClaudeIsland \
+        -configuration Release \
+        -archivePath "$ARCHIVE_PATH" \
+        -destination "generic/platform=macOS" \
+        ENABLE_HARDENED_RUNTIME=YES \
+        CODE_SIGN_STYLE=Automatic
+    exit 1
+}
 
 # Create ExportOptions.plist if it doesn't exist
 EXPORT_OPTIONS="$BUILD_DIR/ExportOptions.plist"
@@ -58,10 +62,14 @@ xcodebuild -exportArchive \
     -archivePath "$ARCHIVE_PATH" \
     -exportPath "$EXPORT_PATH" \
     -exportOptionsPlist "$EXPORT_OPTIONS" \
-    | xcpretty || xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_PATH" \
-    -exportOptionsPlist "$EXPORT_OPTIONS"
+    2>&1 | xcpretty || {
+    echo "ERROR: Export failed. Re-running with full output..."
+    xcodebuild -exportArchive \
+        -archivePath "$ARCHIVE_PATH" \
+        -exportPath "$EXPORT_PATH" \
+        -exportOptionsPlist "$EXPORT_OPTIONS"
+    exit 1
+}
 
 echo ""
 echo "=== Build Complete ==="

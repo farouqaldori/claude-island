@@ -174,7 +174,7 @@ class HookSocketServer {
             return
         }
 
-        chmod(Self.socketPath, 0o777)
+        chmod(Self.socketPath, 0o600)
 
         guard listen(serverSocket, 10) == 0 else {
             logger.error("Failed to listen: \(errno)")

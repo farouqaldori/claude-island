@@ -253,7 +253,12 @@ struct GenericResult: Equatable, @unchecked Sendable {
     let rawData: [String: Any]?
 
     static func == (lhs: GenericResult, rhs: GenericResult) -> Bool {
-        lhs.rawContent == rhs.rawContent
+        guard lhs.rawContent == rhs.rawContent else { return false }
+        // Compare rawData dictionaries if both present
+        if let lhsData = lhs.rawData, let rhsData = rhs.rawData {
+            return NSDictionary(dictionary: lhsData).isEqual(to: rhsData)
+        }
+        return lhs.rawData == nil && rhs.rawData == nil
     }
 }
 

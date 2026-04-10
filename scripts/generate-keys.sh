@@ -65,11 +65,15 @@ echo ""
 
 # Generate the key pair (stores in Keychain, prints public key)
 echo "Generating EdDSA key pair..."
-PUBLIC_KEY=$("$GENERATE_KEYS" | grep -oE '[A-Za-z0-9+/=]{40,}')
+PUBLIC_KEY=$("$GENERATE_KEYS" -p 2>/dev/null | grep -oE '[A-Za-z0-9+/=]{40,}')
 
-# Export private key to file
+# Export the private key from Keychain to file (same key pair as above)
 echo "Exporting private key to file..."
 "$GENERATE_KEYS" -x "$KEYS_DIR/eddsa_private_key"
+
+# Restrict permissions on private key
+chmod 600 "$KEYS_DIR/eddsa_private_key"
+chmod 700 "$KEYS_DIR"
 
 echo ""
 echo "=== IMPORTANT ==="

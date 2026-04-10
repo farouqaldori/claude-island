@@ -114,10 +114,10 @@ struct MCPToolFormatter {
             let stringValue: String
             if let str = value as? String {
                 stringValue = str
-            } else if let num = value as? NSNumber {
-                stringValue = num.stringValue
             } else if let bool = value as? Bool {
                 stringValue = bool ? "true" : "false"
+            } else if let num = value as? NSNumber {
+                stringValue = num.stringValue
             } else {
                 stringValue = String(describing: value)
             }

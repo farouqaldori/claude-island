@@ -249,19 +249,26 @@ if [ -d "$WEBSITE_PUBLIC" ] && [ -f "$RELEASE_DIR/appcast/appcast.xml" ]; then
         echo "Updated appcast.xml with GitHub download URL"
     fi
 
-    # Update src/config.ts with latest version and download URL
+    # Update src/config.ts with latest version and download URL (preserve other content)
     CONFIG_FILE="$WEBSITE_DIR/src/config.ts"
     if [ -n "$GITHUB_DOWNLOAD_URL" ]; then
-        cat > "$CONFIG_FILE" << EOF
+        if [ -f "$CONFIG_FILE" ]; then
+            # Update existing constants in-place
+            sed -i '' "s|export const LATEST_VERSION = .*|export const LATEST_VERSION = \"$VERSION\";|" "$CONFIG_FILE"
+            sed -i '' "s|export const DOWNLOAD_URL = .*|export const DOWNLOAD_URL = \"$GITHUB_DOWNLOAD_URL\";|" "$CONFIG_FILE"
+        else
+            # Create new config file
+            cat > "$CONFIG_FILE" << EOF
 // Auto-updated by create-release.sh
 export const LATEST_VERSION = "$VERSION";
 export const DOWNLOAD_URL = "$GITHUB_DOWNLOAD_URL";
 EOF
+        fi
         echo "Updated src/config.ts with version $VERSION"
     fi
 
     # Commit and push website changes
-    cd "$WEBSITE_DIR"
+    cd "$WEBSITE_DIR" || exit 1
     if [ -d ".git" ]; then
         git add public/appcast.xml src/config.ts
         if ! git diff --cached --quiet; then
