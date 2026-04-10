@@ -353,9 +353,9 @@ struct ChatView: View {
 
     // MARK: - Input Bar
 
-    /// Can send messages only if session is in tmux
+    /// Messaging is only supported in tmux (zellij lacks per-pane write support)
     private var canSendMessages: Bool {
-        session.isMultiplexed && session.tty != nil
+        session.multiplexer == .tmux && session.tty != nil
     }
 
     private var inputBar: some View {
@@ -422,7 +422,7 @@ struct ChatView: View {
     /// Bar for interactive tools like AskUserQuestion that need terminal input
     private var interactivePromptBar: some View {
         ChatInteractivePromptBar(
-            isInTmux: session.isMultiplexed,
+            isInTmux: session.multiplexer == .tmux,
             onGoToTerminal: { focusTerminal() }
         )
     }
@@ -479,9 +479,7 @@ struct ChatView: View {
     }
 
     private func sendToSession(_ text: String) async {
-        guard session.isMultiplexed else { return }
-        guard let tty = session.tty else { return }
-
+        guard session.multiplexer == .tmux, let tty = session.tty else { return }
         if let target = await findTmuxTarget(tty: tty) {
             _ = await ToolApprovalHandler.shared.sendMessage(text, to: target)
         }
