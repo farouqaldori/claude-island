@@ -128,7 +128,7 @@ actor SessionStore {
         session.pid = event.pid
         if let pid = event.pid {
             let tree = ProcessTreeBuilder.shared.buildTree()
-            session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)
+            session.multiplexer = ProcessTreeBuilder.shared.detectMultiplexer(pid: pid, tree: tree)
         }
         if let tty = event.tty {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
@@ -176,7 +176,7 @@ actor SessionStore {
             projectName: URL(fileURLWithPath: event.cwd).lastPathComponent,
             pid: event.pid,
             tty: event.tty?.replacingOccurrences(of: "/dev/", with: ""),
-            isInTmux: false,  // Will be updated
+            multiplexer: .none,  // Will be updated
             phase: .idle
         )
     }

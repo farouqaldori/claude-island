@@ -88,13 +88,18 @@ struct ClaudeInstancesView: View {
     // MARK: - Actions
 
     private func focusSession(_ session: SessionState) {
-        guard session.isInTmux else { return }
-
+        let pid = session.pid
+        let cwd = session.cwd
         Task {
-            if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
-            } else {
-                _ = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
+            switch session.multiplexer {
+            case .tmux:
+                if let pid { _ = await YabaiController.shared.focusWindow(forClaudePid: pid) }
+                else { _ = await YabaiController.shared.focusWindow(forWorkingDirectory: cwd) }
+            case .zellij:
+                if let pid { _ = await ZellijController.shared.focusPane(forClaudePid: pid) }
+                else { _ = await ZellijController.shared.focusPane(forWorkingDirectory: cwd) }
+            case .none:
+                break
             }
         }
     }
@@ -128,8 +133,6 @@ struct InstanceRow: View {
 
     @State private var isHovered = false
     @State private var spinnerPhase = 0
-    @State private var isYabaiAvailable = false
-
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
     private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
@@ -234,10 +237,10 @@ struct InstanceRow: View {
                         onChat()
                     }
 
-                    // Go to Terminal button (only if yabai available)
-                    if isYabaiAvailable {
+                    // Go to Terminal button (available for tmux and zellij)
+                    if session.isMultiplexed {
                         TerminalButton(
-                            isEnabled: session.isInTmux,
+                            isEnabled: true,
                             onTap: { onFocus() }
                         )
                     }
@@ -257,8 +260,8 @@ struct InstanceRow: View {
                         onChat()
                     }
 
-                    // Focus icon (only for tmux instances with yabai)
-                    if session.isInTmux && isYabaiAvailable {
+                    // Focus icon (available for tmux and zellij)
+                    if session.isMultiplexed {
                         IconButton(icon: "eye") {
                             onFocus()
                         }
@@ -287,9 +290,6 @@ struct InstanceRow: View {
                 .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
         )
         .onHover { isHovered = $0 }
-        .task {
-            isYabaiAvailable = await WindowFinder.shared.isYabaiAvailable()
-        }
     }
 
     @ViewBuilder

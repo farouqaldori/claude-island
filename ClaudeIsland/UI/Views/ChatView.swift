@@ -355,7 +355,7 @@ struct ChatView: View {
 
     /// Can send messages only if session is in tmux
     private var canSendMessages: Bool {
-        session.isInTmux && session.tty != nil
+        session.isMultiplexed && session.tty != nil
     }
 
     private var inputBar: some View {
@@ -422,7 +422,7 @@ struct ChatView: View {
     /// Bar for interactive tools like AskUserQuestion that need terminal input
     private var interactivePromptBar: some View {
         ChatInteractivePromptBar(
-            isInTmux: session.isInTmux,
+            isInTmux: session.isMultiplexed,
             onGoToTerminal: { focusTerminal() }
         )
     }
@@ -479,7 +479,7 @@ struct ChatView: View {
     }
 
     private func sendToSession(_ text: String) async {
-        guard session.isInTmux else { return }
+        guard session.isMultiplexed else { return }
         guard let tty = session.tty else { return }
 
         if let target = await findTmuxTarget(tty: tty) {
