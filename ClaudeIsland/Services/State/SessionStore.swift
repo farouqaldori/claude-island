@@ -126,10 +126,9 @@ actor SessionStore {
         }
 
         session.pid = event.pid
-        if let profile = event.profile {
-            session.profile = profile
-            Task { await UsageTracker.shared.registerProfile(profile) }
-        }
+        let profile = event.profile ?? "default"
+        session.profile = profile
+        Task { await UsageTracker.shared.registerProfile(profile) }
         if let pid = event.pid {
             let tree = ProcessTreeBuilder.shared.buildTree()
             session.isInTmux = ProcessTreeBuilder.shared.isInTmux(pid: pid, tree: tree)

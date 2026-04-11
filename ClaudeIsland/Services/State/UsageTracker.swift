@@ -215,8 +215,11 @@ actor UsageTracker {
             return nil
         }
 
+        // Try with fractional seconds first, then without
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: dateStr) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: dateStr)
     }
 

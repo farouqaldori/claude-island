@@ -11,6 +11,10 @@ import os.log
 
 private let logger = Logger(subsystem: "com.claudeisland", category: "UsageSettings")
 
+extension Notification.Name {
+    static let usagePlanDidChange = Notification.Name("usagePlanDidChange")
+}
+
 @MainActor
 class UsageSettings: ObservableObject {
     static let shared = UsageSettings()
@@ -66,10 +70,13 @@ class UsageSettings: ObservableObject {
         return detected
     }
 
-    /// Set plan for a profile (manual override)
+    /// Set plan for a profile (manual override).
+    /// Invalidates cached lifetime savings so they're recomputed with the new fee.
     func setPlan(_ plan: PlanType, for profile: String) {
         profilePlans[profile] = plan
         savePreferences()
+        // Trigger lifetime savings recomputation on next refresh
+        NotificationCenter.default.post(name: .usagePlanDidChange, object: profile)
     }
 
     /// Get the most recent weekly reset date for a profile

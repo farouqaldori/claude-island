@@ -35,6 +35,16 @@ class ClaudeSessionMonitor: ObservableObject {
 
         InterruptWatcherManager.shared.delegate = self
 
+        // Invalidate lifetime savings cache when plan changes
+        NotificationCenter.default.publisher(for: .usagePlanDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                if let profile = notification.object as? String {
+                    self?.profileLifetimeSavings.removeValue(forKey: profile)
+                }
+            }
+            .store(in: &cancellables)
+
         // Refresh usage data every 60 seconds
         usageRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
