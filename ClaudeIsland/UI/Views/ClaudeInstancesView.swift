@@ -37,22 +37,43 @@ struct ClaudeInstancesView: View {
 
     // MARK: - Instances List
 
-    /// Priority: active (approval/processing/compacting) > waitingForInput > idle
-    /// Secondary sort: by last user message date (stable - doesn't change when agent responds)
-    /// Note: approval requests stay in their date-based position to avoid layout shift
-    private var sortedInstances: [SessionState] {
-        sessionMonitor.instances.sorted { a, b in
-            let priorityA = phasePriority(a.phase)
-            let priorityB = phasePriority(b.phase)
-            if priorityA != priorityB {
-                return priorityA < priorityB
-            }
-            // Sort by last user message date (more recent first)
-            // Fall back to lastActivity if no user messages yet
-            let dateA = a.lastUserMessageDate ?? a.lastActivity
-            let dateB = b.lastUserMessageDate ?? b.lastActivity
-            return dateA > dateB
+    /// Group sessions by profile, with ungrouped sessions in their own section
+    private var groupedSessions: [(profile: String?, sessions: [SessionState])] {
+        var groups: [String?: [SessionState]] = [:]
+        for session in sessionMonitor.instances {
+            groups[session.profile, default: []].append(session)
         }
+
+        // Sort sessions within each group
+        let sortGroup: ([SessionState]) -> [SessionState] = { sessions in
+            sessions.sorted { a, b in
+                let priorityA = phasePriority(a.phase)
+                let priorityB = phasePriority(b.phase)
+                if priorityA != priorityB {
+                    return priorityA < priorityB
+                }
+                let dateA = a.lastUserMessageDate ?? a.lastActivity
+                let dateB = b.lastUserMessageDate ?? b.lastActivity
+                return dateA > dateB
+            }
+        }
+
+        var result: [(profile: String?, sessions: [SessionState])] = []
+
+        // Named profiles first (sorted alphabetically)
+        let namedProfiles = groups.keys.compactMap { $0 }.sorted()
+        for profile in namedProfiles {
+            if let sessions = groups[profile] {
+                result.append((profile: profile, sessions: sortGroup(sessions)))
+            }
+        }
+
+        // Ungrouped sessions last
+        if let ungrouped = groups[nil], !ungrouped.isEmpty {
+            result.append((profile: nil, sessions: sortGroup(ungrouped)))
+        }
+
+        return result
     }
 
     /// Lower number = higher priority
@@ -68,16 +89,35 @@ struct ClaudeInstancesView: View {
     private var instancesList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 2) {
-                ForEach(sortedInstances) { session in
-                    InstanceRow(
-                        session: session,
-                        onFocus: { focusSession(session) },
-                        onChat: { openChat(session) },
-                        onArchive: { archiveSession(session) },
-                        onApprove: { approveSession(session) },
-                        onReject: { rejectSession(session) }
-                    )
-                    .id(session.stableId)
+                let groups = groupedSessions
+                let hasMultipleGroups = groups.count > 1 || groups.first?.profile != nil
+
+                ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                    if hasMultipleGroups {
+                        ProfileSectionHeader(
+                            profile: group.profile,
+                            usage: group.profile.flatMap { sessionMonitor.profileUsage[$0] },
+                            cost: group.profile.flatMap { sessionMonitor.profileCosts[$0] },
+                            burnRate: group.profile.flatMap { sessionMonitor.profileBurnRates[$0] },
+                            limits: group.profile.flatMap { sessionMonitor.profileLimits[$0] } ?? [],
+                            lifetimeSavings: group.profile.flatMap { sessionMonitor.profileLifetimeSavings[$0] },
+                            displayConfig: UsageSettings.shared.displayConfig,
+                            sessionCount: group.sessions.count
+                        )
+                        .padding(.top, index > 0 ? 8 : 0)
+                    }
+
+                    ForEach(group.sessions) { session in
+                        InstanceRow(
+                            session: session,
+                            onFocus: { focusSession(session) },
+                            onChat: { openChat(session) },
+                            onArchive: { archiveSession(session) },
+                            onApprove: { approveSession(session) },
+                            onReject: { rejectSession(session) }
+                        )
+                        .id(session.stableId)
+                    }
                 }
             }
             .padding(.vertical, 4)
@@ -113,6 +153,147 @@ struct ClaudeInstancesView: View {
 
     private func archiveSession(_ session: SessionState) {
         sessionMonitor.archiveSession(sessionId: session.sessionId)
+    }
+}
+
+// MARK: - Profile Section Header
+
+struct ProfileSectionHeader: View {
+    let profile: String?
+    let usage: ProfileUsage?
+    let cost: CostEstimate?
+    let burnRate: BurnRate?
+    let limits: [UsageLimitInfo]
+    let lifetimeSavings: LifetimeSavings?
+    let displayConfig: UsageDisplayConfig
+    let sessionCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            // Row 1: profile name + count + usage bars
+            HStack(alignment: .center, spacing: 6) {
+                Text(displayName.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .tracking(0.8)
+
+                Text("\(sessionCount)")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.3))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+
+                Spacer()
+
+                // Inline usage bars
+                ForEach(visibleLimits) { limit in
+                    UsageLimitBarRow(limit: limit)
+                }
+            }
+
+            // Row 2: secondary metrics (cost · tokens · burn rate · savings)
+            if let usage = usage, usage.totalTokens > 0 {
+                HStack(spacing: 0) {
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        if displayConfig.showCost, let cost = cost, cost.windowCost > 0 {
+                            Text(cost.formattedWindowCost)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+
+                            Text("·")
+                        }
+
+                        Text("\(usage.formattedOutput) out")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+
+                        if displayConfig.showBurnRate, let rate = burnRate, rate.tokensPerMinute > 1 {
+                            Text("·")
+
+                            Text(String(format: "%.0f/m", rate.tokensPerMinute))
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        }
+
+                        if displayConfig.showSavings, let cost = cost, cost.monthlySavings > 0 {
+                            Text("·")
+
+                            Text("~\(cost.formattedSavings)/mo saved")
+                                .foregroundColor(TerminalColors.green.opacity(0.5))
+                        }
+
+                        if displayConfig.showLifetimeSavings, let lt = lifetimeSavings, lt.savings > 0 {
+                            Text("·")
+
+                            Text("\(lt.formattedSavings) lifetime")
+                                .foregroundColor(TerminalColors.green.opacity(0.5))
+                        }
+                    }
+                    .font(.system(size: 9))
+                    .foregroundColor(.white.opacity(0.25))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private var displayName: String {
+        guard let profile = profile else { return "Other" }
+        return profile == "default" ? "Default" : profile
+    }
+
+    /// Filter limits based on display config
+    private var visibleLimits: [UsageLimitInfo] {
+        limits.filter { limit in
+            switch limit.id {
+            case "session": return displayConfig.showSessionBar
+            case "weekly": return displayConfig.showWeeklyBar
+            default: return true
+            }
+        }
+    }
+}
+
+// MARK: - Usage Limit Bar Row
+
+struct UsageLimitBarRow: View {
+    let limit: UsageLimitInfo
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(limit.label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.white.opacity(0.25))
+                .frame(width: 42, alignment: .leading)
+
+            // Bar track
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.06))
+
+                    Capsule()
+                        .fill(barColor.opacity(0.7))
+                        .frame(width: max(2, geometry.size.width * limit.fraction))
+                }
+            }
+            .frame(width: 60, height: 3)
+
+            // Percentage
+            Text("\(limit.percentage)%")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(barColor.opacity(0.6))
+                .fixedSize()
+        }
+    }
+
+    private var barColor: Color {
+        switch limit.tier {
+        case .normal: return TerminalColors.green
+        case .warning: return TerminalColors.amber
+        case .critical: return Color(red: 1.0, green: 0.3, blue: 0.3)
+        }
     }
 }
 

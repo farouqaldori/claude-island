@@ -15,13 +15,16 @@ import Sparkle
 
 struct NotchMenuView: View {
     @ObservedObject var viewModel: NotchViewModel
+    @ObservedObject var sessionMonitor: ClaudeSessionMonitor
     @ObservedObject private var updateManager = UpdateManager.shared
     @ObservedObject private var screenSelector = ScreenSelector.shared
     @ObservedObject private var soundSelector = SoundSelector.shared
+    @ObservedObject private var usageSettings = UsageSettings.shared
     @State private var hooksInstalled: Bool = false
     @State private var launchAtLogin: Bool = false
 
     var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
         VStack(spacing: 4) {
             // Back button
             MenuRow(
@@ -38,6 +41,8 @@ struct NotchMenuView: View {
             // Appearance settings
             ScreenPickerRow(screenSelector: screenSelector)
             SoundPickerRow(soundSelector: soundSelector)
+            UsageSettingsRow(usageSettings: usageSettings)
+            UsageHistorySection(sessionMonitor: sessionMonitor)
 
             Divider()
                 .background(Color.white.opacity(0.08))
@@ -108,6 +113,8 @@ struct NotchMenuView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
+        }
+        .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear {
             refreshStates()
