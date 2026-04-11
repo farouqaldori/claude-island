@@ -355,7 +355,7 @@ struct NotchView: View {
                     viewModel: viewModel
                 )
             case .menu:
-                NotchMenuView(viewModel: viewModel)
+                NotchMenuView(viewModel: viewModel, sessionMonitor: sessionMonitor)
             case .chat(let session):
                 ChatView(
                     sessionId: session.sessionId,

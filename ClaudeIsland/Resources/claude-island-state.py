@@ -4,6 +4,7 @@ Claude Island Hook
 - Sends session state to ClaudeIsland.app via Unix socket
 - For PermissionRequest: waits for user decision from the app
 """
+import argparse
 import json
 import os
 import socket
@@ -11,6 +12,13 @@ import sys
 
 SOCKET_PATH = "/tmp/claude-island.sock"
 TIMEOUT_SECONDS = 300  # 5 minutes for permission decisions
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--profile", default=None,
+                        help="Profile name (e.g., home, work)")
+    return parser.parse_args()
 
 
 def get_tty():
@@ -72,6 +80,8 @@ def send_event(state):
 
 
 def main():
+    args = parse_args()
+
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
@@ -94,6 +104,10 @@ def main():
         "pid": claude_pid,
         "tty": tty,
     }
+
+    # Include profile if provided
+    if args.profile:
+        state["profile"] = args.profile
 
     # Map events to status
     if event == "UserPromptSubmit":
