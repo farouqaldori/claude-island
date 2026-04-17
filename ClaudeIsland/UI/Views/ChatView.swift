@@ -51,12 +51,18 @@ struct ChatView: View {
         session.phase.approvalToolName
     }
 
-    
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
                 // Header
                 chatHeader
+
+                // Task board (fixed above messages)
+                if !session.tasks.isEmpty {
+                    taskBoard
+                    Divider().background(Color.white.opacity(0.06))
+                }
 
                 // Messages
                 if isLoading {
@@ -191,10 +197,19 @@ struct ChatView: View {
                     .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.6))
                     .frame(width: 24, height: 24)
 
-                Text(session.displayTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.85))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.displayTitle)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.85))
+                        .lineLimit(1)
+
+                    if session.displayTitle != session.projectName {
+                        Text(session.projectName)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.4))
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer()
             }
@@ -221,6 +236,133 @@ struct ChatView: View {
             .allowsHitTesting(false)
         }
         .zIndex(1) // Render above message list
+    }
+
+    // MARK: - Task Board
+
+    private var taskCompletedCount: Int {
+        session.tasks.filter { $0.status == .completed }.count
+    }
+
+    private var taskTotalCount: Int {
+        session.tasks.count
+    }
+
+    private var taskProgress: Double {
+        guard taskTotalCount > 0 else { return 0 }
+        return Double(taskCompletedCount) / Double(taskTotalCount)
+    }
+
+    @State private var isTaskBoardExpanded: Bool = true
+
+    private var taskBoard: some View {
+        HStack(alignment: .top, spacing: 6) {
+            // Dot indicator matching assistant message style
+            Circle()
+                .fill(Color.blue.opacity(0.6))
+                .frame(width: 6, height: 6)
+                .padding(.top, 5)
+
+            VStack(alignment: .leading, spacing: 6) {
+                // Header: Tasks progress — tappable to toggle
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isTaskBoardExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.3))
+                            .rotationEffect(.degrees(isTaskBoardExpanded ? 90 : 0))
+
+                        Text("Tasks")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.8))
+
+                        Text("\(taskCompletedCount)/\(taskTotalCount)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.4))
+
+                        // Segmented progress bar — one segment per task
+                        HStack(spacing: 2) {
+                            ForEach(session.tasks) { t in
+                                RoundedRectangle(cornerRadius: 1.5)
+                                    .fill(t.status == .completed
+                                        ? Color.green.opacity(0.9)
+                                        : t.status == .inProgress
+                                        ? Color.yellow.opacity(0.85)
+                                        : Color.white.opacity(0.25))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 1.5)
+                                            .stroke(Color.white.opacity(t.status == .pending ? 0.35 : 0), lineWidth: 0.5)
+                                    )
+                                    .frame(height: 5)
+                            }
+                        }
+                        .frame(maxWidth: 120, minHeight: 5)
+                        .animation(.easeInOut(duration: 0.3), value: session.tasks.map(\.status))
+                    }
+                }
+                .buttonStyle(.plain)
+
+                // Task list — collapsible
+                if isTaskBoardExpanded {
+                    ForEach(session.tasks) { task in
+                        HStack(spacing: 5) {
+                            if task.status == .inProgress {
+                                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+                                    let angle = timeline.date.timeIntervalSinceReferenceDate
+                                        .truncatingRemainder(dividingBy: 1.2) / 1.2 * 360
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.blue)
+                                        .frame(width: 10)
+                                        .rotationEffect(.degrees(angle))
+                                }
+                            } else {
+                                Image(systemName: taskBoardIcon(task.status))
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(taskBoardColor(task.status))
+                                    .frame(width: 10)
+                            }
+
+                            Text(task.subject)
+                                .font(.system(size: 11))
+                                .foregroundStyle(task.status == .completed
+                                    ? .white.opacity(0.35)
+                                    : task.status == .inProgress
+                                    ? .white.opacity(0.85)
+                                    : .white.opacity(0.55))
+                                .strikethrough(task.status == .completed, color: .white.opacity(0.2))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+
+            Spacer(minLength: 60)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
+    }
+
+    private func taskBoardIcon(_ status: TaskItem.TaskStatus) -> String {
+        switch status {
+        case .completed: "checkmark.circle.fill"
+        case .inProgress: "arrow.triangle.2.circlepath"
+        case .pending: "circle"
+        case .deleted: "xmark.circle"
+        }
+    }
+
+    private func taskBoardColor(_ status: TaskItem.TaskStatus) -> Color {
+        switch status {
+        case .completed: .green
+        case .inProgress: .blue
+        case .pending: .white.opacity(0.3)
+        case .deleted: .red.opacity(0.3)
+        }
     }
 
     /// Whether the session is currently processing
@@ -292,7 +434,11 @@ struct ChatView: View {
                     }
 
                     ForEach(history.reversed()) { item in
-                        MessageItemView(item: item, sessionId: sessionId)
+                        MessageItemView(
+                            item: item,
+                            sessionId: sessionId,
+                            planContent: session.planContent
+                        )
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
                             .transition(.asymmetric(
@@ -523,21 +669,46 @@ struct ChatView: View {
 struct MessageItemView: View {
     let item: ChatHistoryItem
     let sessionId: String
+    var planContent: String?
+
+    private var isPlanTool: Bool {
+        if case .toolCall(let tool) = item.type {
+            return tool.name == "ExitPlanMode" || tool.name == "exit_plan_mode"
+        }
+        return false
+    }
 
     var body: some View {
-        switch item.type {
-        case .user(let text):
-            UserMessageView(text: text)
-        case .assistant(let text):
-            AssistantMessageView(text: text)
-        case .toolCall(let tool):
-            ToolCallView(tool: tool, sessionId: sessionId)
-        case .thinking(let text):
-            ThinkingView(text: text)
-        case .image(let block):
-            ImageMessageView(image: block)
-        case .interrupted:
-            InterruptedMessageView()
+        VStack(alignment: .leading, spacing: 8) {
+            switch item.type {
+            case .user(let text):
+                UserMessageView(text: text)
+            case .assistant(let text):
+                AssistantMessageView(text: text)
+            case .toolCall(let tool):
+                ToolCallView(tool: tool, sessionId: sessionId)
+            case .thinking(let text):
+                ThinkingView(text: text)
+            case .image(let block):
+                ImageMessageView(image: block)
+            case .interrupted:
+                InterruptedMessageView()
+            }
+
+            // Show plan content inline after ExitPlanMode tool call
+            if isPlanTool, let planContent {
+                HStack(alignment: .top, spacing: 6) {
+                    Circle()
+                        .fill(Color.blue.opacity(0.6))
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 5)
+
+                    MarkdownText(planContent, color: .white.opacity(0.9), fontSize: 13)
+                        .textSelection(.enabled)
+
+                    Spacer(minLength: 60)
+                }
+            }
         }
     }
 }

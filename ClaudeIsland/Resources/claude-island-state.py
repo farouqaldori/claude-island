@@ -113,6 +113,28 @@ def main():
         state["status"] = "processing"
         state["tool"] = data.get("tool_name")
         state["tool_input"] = tool_input
+        # Forward tool_result for task ID resolution
+        tool_result = data.get("tool_result")
+        if tool_result:
+            if isinstance(tool_result, str):
+                state["tool_result"] = tool_result
+            elif isinstance(tool_result, dict):
+                # tool_result can be a dict with output/message/content
+                state["tool_result"] = (
+                    tool_result.get("output")
+                    or tool_result.get("message")
+                    or tool_result.get("content")
+                    or ""
+                )
+        # Forward tool_response for structured results (e.g. TaskCreate → {task:{id:...,subject:...}})
+        tool_response = data.get("tool_response")
+        if isinstance(tool_response, dict):
+            # Extract resolved task ID for TaskCreate
+            task = tool_response.get("task")
+            if isinstance(task, dict) and "id" in task:
+                state["resolved_task_id"] = str(task["id"])
+                if "subject" in task:
+                    state["resolved_task_subject"] = task["subject"]
         # Send tool_use_id so Swift can cancel the specific pending permission
         tool_use_id_from_event = data.get("tool_use_id")
         if tool_use_id_from_event:

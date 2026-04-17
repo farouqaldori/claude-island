@@ -99,6 +99,8 @@ private struct BlockRenderer: View {
             Divider()
                 .background(baseColor.opacity(0.3))
                 .padding(.vertical, 4)
+        } else if let table = markup as? Markdown.Table {
+            tableView(table)
         } else {
             EmptyView()
         }
@@ -180,6 +182,65 @@ private struct BlockRenderer: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func tableView(_ table: Markdown.Table) -> some View {
+        let headCells = Array(table.head.cells)
+        let bodyRows = Array(table.body.rows)
+
+        VStack(alignment: .leading, spacing: 0) {
+            // Header row
+            HStack(spacing: 0) {
+                ForEach(Array(headCells.enumerated()), id: \.offset) { i, cell in
+                    cellPlainText(cell)
+                        .fontWeight(.semibold)
+                        .foregroundColor(baseColor)
+                        .font(.system(size: fontSize - 1))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if i < headCells.count - 1 {
+                        Rectangle().fill(baseColor.opacity(0.15)).frame(width: 0.5)
+                    }
+                }
+            }
+            .background(baseColor.opacity(0.08))
+
+            Rectangle().fill(baseColor.opacity(0.2)).frame(height: 0.5)
+
+            // Body rows
+            ForEach(Array(bodyRows.enumerated()), id: \.offset) { _, row in
+                let cells = Array(row.cells)
+                HStack(spacing: 0) {
+                    ForEach(Array(cells.enumerated()), id: \.offset) { i, cell in
+                        cellPlainText(cell)
+                            .foregroundColor(baseColor.opacity(0.8))
+                            .font(.system(size: fontSize - 1))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if i < cells.count - 1 {
+                            Rectangle().fill(baseColor.opacity(0.1)).frame(width: 0.5)
+                        }
+                    }
+                }
+
+                Rectangle().fill(baseColor.opacity(0.08)).frame(height: 0.5)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(baseColor.opacity(0.15), lineWidth: 0.5)
+        )
+    }
+
+    /// Simple plain text extraction from a table cell
+    private func cellPlainText(_ cell: Markdown.Table.Cell) -> SwiftUI.Text {
+        SwiftUI.Text(cell.plainText)
     }
 }
 
