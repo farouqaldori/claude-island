@@ -22,10 +22,14 @@ struct NotchView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
     @State private var previousWaitingForInputIds: Set<String> = []
-    @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
+    @State private var waitingForInputTimestamps: [String: Date] = [:]
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
+
+    // Settings that drive closed-state sizing — reactive via @AppStorage
+    @AppStorage("adaptToStatusBarHeight") private var adaptToStatusBarHeight: Bool = true
+    @AppStorage("customClosedWidth") private var customClosedWidth: Double = 0
 
     @Namespace private var activityNamespace
 
@@ -57,10 +61,20 @@ struct NotchView: View {
     // MARK: - Sizing
 
     private var closedNotchSize: CGSize {
-        CGSize(
-            width: viewModel.deviceNotchRect.width,
-            height: viewModel.deviceNotchRect.height
-        )
+        let nativeHeight = viewModel.deviceNotchRect.height
+        let statusBarHeight = NSStatusBar.system.thickness
+
+        let baseHeight = adaptToStatusBarHeight ? min(nativeHeight, statusBarHeight) : nativeHeight
+        let baseWidth = viewModel.deviceNotchRect.width / 2
+
+        let width = customClosedWidth > 0 ? CGFloat(customClosedWidth) : baseWidth
+
+        return CGSize(width: max(40, width), height: max(16, baseHeight))
+    }
+
+    /// Icon size scaled proportionally to the closed notch height (14pt baseline at 24pt height)
+    private var closedIconSize: CGFloat {
+        max(8, closedNotchSize.height * (14.0 / 24.0))
     }
 
     /// Extra width for expanding activities (like Dynamic Island)
@@ -181,6 +195,7 @@ struct NotchView: View {
                     .onTapGesture {
                         if viewModel.status != .opened {
                             viewModel.notchOpen(reason: .click)
+                            viewModel.contentType = .menu
                         }
                     }
             }
@@ -246,55 +261,58 @@ struct NotchView: View {
     @ViewBuilder
     private var headerRow: some View {
         HStack(spacing: 0) {
-            // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
-            if showClosedActivity {
-                HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
-                        .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
+            // Left: crab is ALWAYS visible, pinned to the left edge.
+            // Also shows permission indicator when pending.
+            HStack(spacing: 4) {
+                ClaudeCrabIcon(size: closedIconSize, animateLegs: isProcessing)
+                if hasPendingPermission {
+                    PermissionIndicatorIcon(size: closedIconSize, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                }
+            }
+            .frame(
+                width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? closedIconSize + 4 : 0),
+                alignment: .leading
+            )
+            .padding(.leading, viewModel.status == .opened ? 8 : 0)
 
-                    // Permission indicator only (amber) - waiting for input shows checkmark on right
-                    if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
-                            .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
+            // Center: flexible spacer when closed; header controls when opened
+            if viewModel.status == .opened {
+                openedHeaderContent
+            } else {
+                Spacer()
+            }
+
+            // Right: activity indicators when Claude is active; settings icon when idle
+            if showClosedActivity {
+                Group {
+                    if isProcessing || hasPendingPermission {
+                        ProcessingSpinner(size: closedIconSize * 0.85)
+                    } else if hasWaitingForInput {
+                        ReadyForInputIndicatorIcon(size: closedIconSize, color: TerminalColors.green)
                     }
                 }
-                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
-                .padding(.leading, viewModel.status == .opened ? 8 : 0)
-            }
-
-            // Center content
-            if viewModel.status == .opened {
-                // Opened: show header content
-                openedHeaderContent
-            } else if !showClosedActivity {
-                // Closed without activity: empty space
-                Rectangle()
-                    .fill(.clear)
-                    .frame(width: closedNotchSize.width - 20)
-            } else {
-                // Closed with activity: black spacer (with optional bounce)
-                Rectangle()
-                    .fill(.black)
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
-            }
-
-            // Right side - spinner when processing/pending, checkmark when waiting for input
-            if showClosedActivity {
-                if isProcessing || hasPendingPermission {
-                    ProcessingSpinner()
-                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
-                        .padding(.trailing, viewModel.status == .opened ? 0 : 4)
-                } else if hasWaitingForInput {
-                    // Checkmark for waiting-for-input on the right side
-                    ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
-                        .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
-                        .padding(.trailing, viewModel.status == .opened ? 0 : 4)
+                .frame(width: viewModel.status == .opened ? 20 : sideWidth, alignment: .trailing)
+                .padding(.trailing, viewModel.status == .opened ? 0 : 4)
+            } else if viewModel.status == .closed {
+                Button {
+                    viewModel.notchOpen(reason: .click)
+                    viewModel.contentType = .menu
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.4))
+                        .frame(width: 22, height: 22)
                 }
+                .buttonStyle(.plain)
+                .frame(width: sideWidth, alignment: .trailing)
+                .padding(.trailing, -4)
             }
         }
-        .frame(height: closedNotchSize.height)
+        // Closed: fix total width so left/right icons are always at the edges
+        .frame(
+            width: viewModel.status == .opened ? nil : closedNotchSize.width,
+            height: max(16, closedNotchSize.height)
+        )
     }
 
     private var sideWidth: CGFloat {
@@ -306,13 +324,7 @@ struct NotchView: View {
     @ViewBuilder
     private var openedHeaderContent: some View {
         HStack(spacing: 12) {
-            // Show static crab only if not showing activity in headerRow
-            // (headerRow handles crab + indicator when showClosedActivity is true)
-            if !showClosedActivity {
-                ClaudeCrabIcon(size: 14)
-                    .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
-                    .padding(.leading, 8)
-            }
+            // Crab is always rendered in the left of headerRow; no duplicate needed here.
 
             Spacer()
 

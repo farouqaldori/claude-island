@@ -40,6 +40,8 @@ struct NotchMenuView: View {
 
                 // Appearance settings
                 ScreenPickerRow(screenSelector: screenSelector)
+                StatusBarHeightRow()
+                ClosedSizeRow()
                 SoundPickerRow(soundSelector: soundSelector)
                 ClaudeDirPickerRow()
 
@@ -484,6 +486,112 @@ struct MenuRow: View {
         return .white.opacity(isHovered ? 1.0 : 0.7)
     }
 }
+
+// MARK: - Status Bar Height Row
+
+struct StatusBarHeightRow: View {
+    @AppStorage("adaptToStatusBarHeight") private var isOn: Bool = true
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "menubar.rectangle")
+                    .font(.system(size: 12))
+                    .foregroundColor(textColor)
+                    .frame(width: 16)
+
+                Text("Adapt to Status Bar")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(textColor)
+
+                Spacer()
+
+                Circle()
+                    .fill(isOn ? TerminalColors.green : Color.white.opacity(0.3))
+                    .frame(width: 6, height: 6)
+
+                Text(isOn ? "On" : "Off")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+
+    private var textColor: Color {
+        .white.opacity(isHovered ? 1.0 : 0.7)
+    }
+}
+
+// MARK: - Closed Size Row
+
+struct ClosedSizeRow: View {
+    @AppStorage("customClosedWidth") private var customWidth: Double = 0
+
+    @State private var widthText: String = ""
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.left.and.right")
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.7))
+                .frame(width: 16)
+
+            Text("Width")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.7))
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                Text("W")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
+                TextField("Auto", text: $widthText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: 44)
+                    .multilineTextAlignment(.center)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.1)))
+                    .onSubmit { commitWidth() }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+        )
+        .onHover { isHovered = $0 }
+        .onAppear {
+            widthText = customWidth > 0 ? String(Int(customWidth)) : ""
+        }
+        .onChange(of: customWidth) { _, _ in
+            widthText = customWidth > 0 ? String(Int(customWidth)) : ""
+        }
+    }
+
+    private func commitWidth() {
+        customWidth = Double(widthText.trimmingCharacters(in: .whitespaces)) ?? 0
+    }
+}
+
+// MARK: - Toggle Row
 
 struct MenuToggleRow: View {
     let icon: String
