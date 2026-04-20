@@ -88,12 +88,14 @@ struct ClaudeInstancesView: View {
     // MARK: - Actions
 
     private func focusSession(_ session: SessionState) {
-        guard session.isInTmux else { return }
-
         Task {
             if let pid = session.pid {
-                _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
-            } else {
+                if session.isInTmux, await WindowFinder.shared.isYabaiAvailable() {
+                    _ = await YabaiController.shared.focusWindow(forClaudePid: pid)
+                } else {
+                    _ = await NativeTerminalInputHandler.shared.focusTerminal(pid: pid, tty: session.tty)
+                }
+            } else if session.isInTmux {
                 _ = await YabaiController.shared.focusWindow(forWorkingDirectory: session.cwd)
             }
         }
@@ -267,10 +269,10 @@ struct InstanceRow: View {
                         onChat()
                     }
 
-                    // Go to Terminal button (only if yabai available)
-                    if isYabaiAvailable {
+                    // Go to Terminal button
+                    if session.pid != nil {
                         TerminalButton(
-                            isEnabled: session.isInTmux,
+                            isEnabled: true,
                             onTap: { onFocus() }
                         )
                     }
@@ -290,8 +292,8 @@ struct InstanceRow: View {
                         onChat()
                     }
 
-                    // Focus icon (only for tmux instances with yabai)
-                    if session.isInTmux && isYabaiAvailable {
+                    // Focus icon - works for all sessions with a PID
+                    if session.pid != nil {
                         IconButton(icon: "eye") {
                             onFocus()
                         }
@@ -313,6 +315,9 @@ struct InstanceRow: View {
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             onChat()
+        }
+        .onTapGesture(count: 1) {
+            onFocus()
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(
