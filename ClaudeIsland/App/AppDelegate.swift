@@ -13,6 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let updater: SPUUpdater
     private let userDriver: NotchUserDriver
 
+    @MainActor
     var windowController: NotchWindowController? {
         windowManager?.windowController
     }
@@ -35,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         if !ensureSingleInstance() {
             NSApplication.shared.terminate(nil)
@@ -87,6 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @MainActor
     private func handleScreenChange() {
         _ = windowManager?.setupNotchWindow()
     }
