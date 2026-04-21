@@ -291,7 +291,7 @@ struct ChatView: View {
                             ))
                     }
 
-                    ForEach(history.reversed()) { item in
+                    ForEach(Array(history.lazy.reversed())) { item in
                         MessageItemView(item: item, sessionId: sessionId)
                             .padding(.horizontal, 16)
                             .scaleEffect(x: 1, y: -1)
@@ -304,7 +304,6 @@ struct ChatView: View {
                 .padding(.top, 20)
                 .padding(.bottom, 20)
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isProcessing)
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: history.count)
             }
             .scaleEffect(x: 1, y: -1)
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -648,8 +647,7 @@ struct ProcessingIndicatorView: View {
     private let color = Color(red: 0.85, green: 0.47, blue: 0.34) // Claude orange
     private let baseText: String
 
-    @State private var dotCount: Int = 1
-    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+    @State private var isAnimating = false
 
     /// Use a turnId to select text consistently per user turn
     init(turnId: String = "") {
@@ -658,23 +656,36 @@ struct ProcessingIndicatorView: View {
         baseText = baseTexts[index]
     }
 
-    private var dots: String {
-        String(repeating: ".", count: dotCount)
-    }
-
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
             ProcessingSpinner()
                 .frame(width: 6)
 
-            Text(baseText + dots)
+            Text(baseText)
                 .font(.system(size: 13))
                 .foregroundColor(color)
 
+            // Animated dots using opacity instead of timer-driven state updates.
+            // Each dot fades in with a stagger, avoiding layout recalculation.
+            HStack(spacing: 1) {
+                ForEach(0..<3, id: \.self) { i in
+                    Text(".")
+                        .font(.system(size: 13))
+                        .foregroundColor(color)
+                        .opacity(isAnimating ? 1 : 0)
+                        .animation(
+                            .easeInOut(duration: 0.4)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(i) * 0.2),
+                            value: isAnimating
+                        )
+                }
+            }
+
             Spacer()
         }
-        .onReceive(timer) { _ in
-            dotCount = (dotCount % 3) + 1
+        .onAppear {
+            isAnimating = true
         }
     }
 }

@@ -5,7 +5,6 @@
 //  Minimal instances list matching Dynamic Island aesthetic
 //
 
-import Combine
 import SwiftUI
 
 struct ClaudeInstancesView: View {
@@ -51,7 +50,11 @@ struct ClaudeInstancesView: View {
             // Fall back to lastActivity if no user messages yet
             let dateA = a.lastUserMessageDate ?? a.lastActivity
             let dateB = b.lastUserMessageDate ?? b.lastActivity
-            return dateA > dateB
+            if dateA != dateB {
+                return dateA > dateB
+            }
+            // Tertiary sort by sessionId for deterministic ordering when dates tie
+            return a.sessionId < b.sessionId
         }
     }
 
@@ -127,12 +130,10 @@ struct InstanceRow: View {
     let onReject: () -> Void
 
     @State private var isHovered = false
-    @State private var spinnerPhase = 0
     @State private var isYabaiAvailable = false
+    @State private var isSpinnerAnimating = false
 
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
-    private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
-    private let spinnerTimer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
 
     /// Whether we're showing the approval UI
     private var isWaitingForApproval: Bool {
@@ -329,19 +330,27 @@ struct InstanceRow: View {
     private var stateIndicator: some View {
         switch session.phase {
         case .processing, .compacting:
-            Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
+            Text("✳")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(claudeOrange)
-                .onReceive(spinnerTimer) { _ in
-                    spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
-                }
+                .rotationEffect(.degrees(isSpinnerAnimating ? 360 : 0))
+                .animation(
+                    .linear(duration: 1.0).repeatForever(autoreverses: false),
+                    value: isSpinnerAnimating
+                )
+                .onAppear { isSpinnerAnimating = true }
+                .onDisappear { isSpinnerAnimating = false }
         case .waitingForApproval:
-            Text(spinnerSymbols[spinnerPhase % spinnerSymbols.count])
+            Text("✳")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(TerminalColors.amber)
-                .onReceive(spinnerTimer) { _ in
-                    spinnerPhase = (spinnerPhase + 1) % spinnerSymbols.count
-                }
+                .rotationEffect(.degrees(isSpinnerAnimating ? 360 : 0))
+                .animation(
+                    .linear(duration: 1.0).repeatForever(autoreverses: false),
+                    value: isSpinnerAnimating
+                )
+                .onAppear { isSpinnerAnimating = true }
+                .onDisappear { isSpinnerAnimating = false }
         case .waitingForInput:
             Circle()
                 .fill(TerminalColors.green)
