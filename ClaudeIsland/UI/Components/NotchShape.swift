@@ -114,17 +114,48 @@ struct NotchShape: Shape {
     }
 }
 
+/// Pill shape for external displays without a notch.
+/// Unlike NotchShape, this has uniform rounded corners on all sides
+/// (no inward-curving top corners that mimic a physical notch).
+struct PillShape: Shape {
+    var cornerRadius: CGFloat
+
+    init(cornerRadius: CGFloat = 12) {
+        self.cornerRadius = cornerRadius
+    }
+
+    var animatableData: CGFloat {
+        get { cornerRadius }
+        set { cornerRadius = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(cornerRadius, rect.height / 2, rect.width / 2)
+        return Path(roundedRect: rect, cornerRadius: r)
+    }
+}
+
 #Preview {
     VStack(spacing: 20) {
-        // Closed state
+        // Notch: Closed state
         NotchShape(topCornerRadius: 6, bottomCornerRadius: 14)
             .fill(.black)
             .frame(width: 200, height: 32)
 
-        // Open state
+        // Notch: Open state
         NotchShape(topCornerRadius: 19, bottomCornerRadius: 24)
             .fill(.black)
             .frame(width: 600, height: 200)
+
+        // Pill: Closed state (menu bar height)
+        PillShape(cornerRadius: 12)
+            .fill(.black)
+            .frame(width: 180, height: 24)
+
+        // Pill: Open state
+        PillShape(cornerRadius: 20)
+            .fill(.black)
+            .frame(width: 480, height: 320)
     }
     .padding(20)
     .background(Color.gray.opacity(0.3))

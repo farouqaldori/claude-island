@@ -8,11 +8,17 @@
 import AppKit
 
 extension NSScreen {
-    /// Returns the size of the notch on this screen (pixel-perfect using macOS APIs)
+    /// The menu bar height on this screen
+    var menuBarHeight: CGFloat {
+        frame.maxY - visibleFrame.maxY
+    }
+
+    /// Returns the size of the notch on this screen (pixel-perfect using macOS APIs).
+    /// On non-notch displays, returns a pill-sized rect matching the menu bar height.
     var notchSize: CGSize {
-        guard safeAreaInsets.top > 0 else {
-            // Fallback for non-notch displays (matches typical MacBook notch)
-            return CGSize(width: 224, height: 38)
+        guard hasPhysicalNotch else {
+            // Pill dimensions for non-notch displays — compact to fit in menu bar
+            return CGSize(width: 180, height: 22)
         }
 
         let notchHeight = safeAreaInsets.top
@@ -46,8 +52,9 @@ extension NSScreen {
         return NSScreen.main
     }
 
-    /// Whether this screen has a physical notch (camera housing)
+    /// Whether this screen has a physical notch (camera housing).
+    /// Only the built-in display can have a physical notch.
     var hasPhysicalNotch: Bool {
-        safeAreaInsets.top > 0
+        isBuiltinDisplay && safeAreaInsets.top > 0
     }
 }

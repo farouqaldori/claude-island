@@ -62,15 +62,17 @@ class NotchViewController: NSViewController {
                     height: panelHeight
                 )
             case .closed, .popping:
-                // When closed, use the notch rect
+                // When closed, use the notch rect (or pill rect on non-notch displays)
                 let notchRect = geometry.deviceNotchRect
                 let screenWidth = geometry.screenRect.width
-                // Add some padding for easier interaction
+                // Pill mode needs larger padding since the pill width is content-driven
+                let padX: CGFloat = geometry.isPillMode ? 60 : 10
+                let padY: CGFloat = geometry.isPillMode ? 8 : 5
                 return CGRect(
-                    x: (screenWidth - notchRect.width) / 2 - 10,
-                    y: windowHeight - notchRect.height - 5,
-                    width: notchRect.width + 20,
-                    height: notchRect.height + 10
+                    x: (screenWidth - notchRect.width) / 2 - padX,
+                    y: windowHeight - notchRect.height - padY,
+                    width: notchRect.width + padX * 2,
+                    height: notchRect.height + padY * 2
                 )
             }
         }

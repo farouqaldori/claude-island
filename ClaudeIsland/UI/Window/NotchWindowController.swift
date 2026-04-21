@@ -37,12 +37,14 @@ class NotchWindowController: NSWindowController {
             height: notchSize.height
         )
 
+        let hasNotch = screen.hasPhysicalNotch
+
         // Create view model
         self.viewModel = NotchViewModel(
             deviceNotchRect: deviceNotchRect,
             screenRect: screenFrame,
             windowHeight: windowHeight,
-            hasPhysicalNotch: screen.hasPhysicalNotch
+            hasPhysicalNotch: hasNotch
         )
 
         // Create the window
@@ -54,6 +56,11 @@ class NotchWindowController: NSWindowController {
         )
 
         super.init(window: notchWindow)
+
+        // Pill mode sits within the menu bar, notch mode floats above it
+        if !hasNotch {
+            notchWindow.level = .mainMenu + 1
+        }
 
         // Create the SwiftUI view with pass-through hosting
         let hostingController = NotchViewController(viewModel: viewModel)
