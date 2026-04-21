@@ -130,6 +130,67 @@ struct PermissionIndicatorIcon: View {
     }
 }
 
+// Session state dots - shows colored dots for each session's state
+struct SessionStateDots: View {
+    let sessions: [SessionState]
+
+    private let dotSize: CGFloat = 6
+    private let maxDots: Int = 8
+    private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
+
+    /// Filter to only active/attention-needed sessions and sort by priority
+    private var sortedSessions: [SessionState] {
+        sessions
+            .filter { $0.phase != .ended && $0.phase != .idle }
+            .sorted { a, b in
+                priority(for: a.phase) < priority(for: b.phase)
+            }
+    }
+
+    /// Lower number = higher priority (shows first/left)
+    private func priority(for phase: SessionPhase) -> Int {
+        switch phase {
+        case .waitingForApproval: return 0
+        case .processing, .compacting: return 1
+        case .waitingForInput: return 2
+        case .idle, .ended: return 3
+        }
+    }
+
+    /// Color for each session phase
+    private func color(for phase: SessionPhase) -> Color {
+        switch phase {
+        case .waitingForApproval:
+            return TerminalColors.blue
+        case .processing, .compacting:
+            return claudeOrange
+        case .waitingForInput:
+            return TerminalColors.green
+        case .idle, .ended:
+            return Color.white.opacity(0.25)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            let displaySessions = Array(sortedSessions.prefix(maxDots))
+            let overflow = sessions.count - maxDots
+
+            ForEach(displaySessions) { session in
+                Circle()
+                    .fill(color(for: session.phase))
+                    .frame(width: dotSize, height: dotSize)
+            }
+
+            if overflow > 0 {
+                Text("+\(overflow)")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+        }
+    }
+}
+
 // Pixel art "ready for input" indicator icon (checkmark/done shape)
 struct ReadyForInputIndicatorIcon: View {
     let size: CGFloat

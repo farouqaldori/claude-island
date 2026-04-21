@@ -54,6 +54,16 @@ struct NotchView: View {
         }
     }
 
+    /// Sessions that are active (not idle/ended) - used for dots display
+    private var activeSessions: [SessionState] {
+        sessionMonitor.instances.filter { $0.phase != .ended && $0.phase != .idle }
+    }
+
+    /// Whether we have multiple active sessions to show dots for
+    private var hasMultipleActiveSessions: Bool {
+        activeSessions.count > 1
+    }
+
     // MARK: - Sizing
 
     private var closedNotchSize: CGSize {
@@ -213,9 +223,9 @@ struct NotchView: View {
         activityCoordinator.expandingActivity.show && activityCoordinator.expandingActivity.type == .claude
     }
 
-    /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
+    /// Whether to show the expanded closed state (processing, pending permission, waiting for input, or multiple active sessions)
     private var showClosedActivity: Bool {
-        isProcessing || hasPendingPermission || hasWaitingForInput
+        isProcessing || hasPendingPermission || hasWaitingForInput || hasMultipleActiveSessions
     }
 
     @ViewBuilder
@@ -262,6 +272,12 @@ struct NotchView: View {
                 .padding(.leading, viewModel.status == .opened ? 8 : 0)
             }
 
+            // Session state dots (only when closed with multiple active/attention-needed sessions)
+            if viewModel.status != .opened && hasMultipleActiveSessions {
+                SessionStateDots(sessions: activeSessions)
+                    .padding(.leading, 6)
+            }
+
             // Center content
             if viewModel.status == .opened {
                 // Opened: show header content
@@ -273,9 +289,11 @@ struct NotchView: View {
                     .frame(width: closedNotchSize.width - 20)
             } else {
                 // Closed with activity: black spacer (with optional bounce)
+                // Reduce spacer when showing session dots
+                let dotsWidth: CGFloat = hasMultipleActiveSessions ? CGFloat(min(activeSessions.count, 8) * 10 + 6) : 0
                 Rectangle()
                     .fill(.black)
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
+                    .frame(width: max(20, closedNotchSize.width - cornerRadiusInsets.closed.top - dotsWidth) + (isBouncing ? 16 : 0))
             }
 
             // Right side - spinner when processing/pending, checkmark when waiting for input
@@ -395,7 +413,7 @@ struct NotchView: View {
             // Don't hide on non-notched devices - users need a visible target
             if viewModel.status == .closed && viewModel.hasPhysicalNotch {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && viewModel.status == .closed {
+                    if !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !hasMultipleActiveSessions && viewModel.status == .closed {
                         isVisible = false
                     }
                 }
@@ -415,7 +433,7 @@ struct NotchView: View {
             // Don't hide on non-notched devices - users need a visible target
             guard viewModel.hasPhysicalNotch else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !activityCoordinator.expandingActivity.show {
+                if viewModel.status == .closed && !isAnyProcessing && !hasPendingPermission && !hasWaitingForInput && !hasMultipleActiveSessions && !activityCoordinator.expandingActivity.show {
                     isVisible = false
                 }
             }
