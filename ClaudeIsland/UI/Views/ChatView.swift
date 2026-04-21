@@ -5,6 +5,7 @@
 //  Redesigned chat interface with clean visual hierarchy
 //
 
+import AppKit
 import Combine
 import SwiftUI
 
@@ -24,6 +25,7 @@ struct ChatView: View {
     @State private var newMessageCount: Int = 0
     @State private var previousHistoryCount: Int = 0
     @State private var isBottomVisible: Bool = true
+    @State private var pendingImage: NSImage? = nil
     @FocusState private var isInputFocused: Bool
 
     init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
@@ -358,40 +360,63 @@ struct ChatView: View {
         session.isInTmux && session.tty != nil
     }
 
-    private var inputBar: some View {
-        HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
-                .focused($isInputFocused)
-                .disabled(!canSendMessages)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.white.opacity(canSendMessages ? 0.08 : 0.04))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 20)
-                                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
-                        )
-                )
-                .onSubmit {
-                    sendMessage()
-                }
+    private var canSendContent: Bool {
+        !inputText.isEmpty || pendingImage != nil
+    }
 
-            Button {
-                sendMessage()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(!canSendMessages || inputText.isEmpty ? .white.opacity(0.2) : .white.opacity(0.9))
+    private var inputBar: some View {
+        VStack(spacing: 0) {
+            // Image preview (if any)
+            if let image = pendingImage {
+                imagePreview(image: image)
             }
-            .buttonStyle(.plain)
-            .disabled(!canSendMessages || inputText.isEmpty)
+
+            HStack(spacing: 10) {
+                // Paste image button
+                Button {
+                    pasteImageFromClipboard()
+                } label: {
+                    Image(systemName: pendingImage != nil ? "photo.fill" : "photo")
+                        .font(.system(size: 16))
+                        .foregroundColor(canSendMessages ? (pendingImage != nil ? .orange : .white.opacity(0.5)) : .white.opacity(0.2))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSendMessages)
+                .help("Paste image (⌘V)")
+
+                TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
+                    .focused($isInputFocused)
+                    .disabled(!canSendMessages)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.white.opacity(canSendMessages ? 0.08 : 0.04))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    )
+                    .onSubmit {
+                        sendMessage()
+                    }
+
+                Button {
+                    sendMessage()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(!canSendMessages || !canSendContent ? .white.opacity(0.2) : .white.opacity(0.9))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSendMessages || !canSendContent)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
         .background(Color.black.opacity(0.2))
         .overlay(alignment: .top) {
             LinearGradient(
@@ -404,6 +429,57 @@ struct ChatView: View {
             .allowsHitTesting(false)
         }
         .zIndex(1) // Render above message list
+        .onAppear {
+            // Monitor for Cmd+V to intercept image paste
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // Check for Cmd+V
+                if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
+                    // Check if clipboard has an image
+                    let pasteboard = NSPasteboard.general
+                    let hasImage = pasteboard.data(forType: .tiff) != nil || pasteboard.data(forType: .png) != nil
+
+                    if hasImage && canSendMessages && isInputFocused {
+                        pasteImageFromClipboard()
+                        return nil // Consume the event
+                    }
+                }
+                return event
+            }
+        }
+    }
+
+    private func imagePreview(image: NSImage) -> some View {
+        HStack {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxHeight: 80)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
+                )
+
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    pendingImage = nil
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .transition(.asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.9)),
+            removal: .opacity
+        ))
     }
 
     // MARK: - Approval Bar
@@ -464,9 +540,12 @@ struct ChatView: View {
 
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let image = pendingImage
+
+        guard !text.isEmpty || image != nil else { return }
 
         inputText = ""
+        pendingImage = nil
 
         // Resume autoscroll when user sends a message
         resumeAutoscroll()
@@ -474,7 +553,79 @@ struct ChatView: View {
 
         // Don't add to history here - it will be synced from JSONL when UserPromptSubmit event fires
         Task {
-            await sendToSession(text)
+            var messageToSend = text
+
+            // If there's an image, save it and include the path
+            if let image = image {
+                if let imagePath = saveImageToTemp(image) {
+                    // Prepend image path to message
+                    if text.isEmpty {
+                        messageToSend = imagePath
+                    } else {
+                        messageToSend = "\(imagePath) \(text)"
+                    }
+                }
+            }
+
+            if !messageToSend.isEmpty {
+                await sendToSession(messageToSend)
+            }
+        }
+    }
+
+    // MARK: - Image Handling
+
+    private func pasteImageFromClipboard() {
+        let pasteboard = NSPasteboard.general
+
+        // Check for image types
+        let imageTypes: [NSPasteboard.PasteboardType] = [.tiff, .png]
+
+        for imageType in imageTypes {
+            if let data = pasteboard.data(forType: imageType),
+               let image = NSImage(data: data) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    pendingImage = image
+                }
+                return
+            }
+        }
+
+        // Also check for file URLs that might be images
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ["png", "jpg", "jpeg", "gif", "webp", "heic"].contains(ext) {
+                    if let image = NSImage(contentsOf: url) {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            pendingImage = image
+                        }
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    private func saveImageToTemp(_ image: NSImage) -> String? {
+        // Create unique filename
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let filename = "claude-island-\(timestamp).png"
+        let tempPath = NSTemporaryDirectory() + filename
+
+        // Convert to PNG data
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+
+        // Write to temp file
+        do {
+            try pngData.write(to: URL(fileURLWithPath: tempPath))
+            return tempPath
+        } catch {
+            return nil
         }
     }
 
