@@ -63,6 +63,9 @@ actor SessionStore {
         case .permissionApproved(let sessionId, let toolUseId):
             await processPermissionApproved(sessionId: sessionId, toolUseId: toolUseId)
 
+        case .permissionApprovedAlways(let sessionId, let toolUseId, let toolName):
+            await processPermissionApprovedAlways(sessionId: sessionId, toolUseId: toolUseId, toolName: toolName)
+
         case .permissionDenied(let sessionId, let toolUseId, let reason):
             await processPermissionDenied(sessionId: sessionId, toolUseId: toolUseId, reason: reason)
 
@@ -165,6 +168,17 @@ actor SessionStore {
 
         if event.event == "Stop" {
             session.subagentState = SubagentState()
+        }
+
+        // Auto-approve: if waiting for approval for an auto-approved tool, approve immediately
+        if case .waitingForApproval(let ctx) = session.phase,
+           session.autoApprovedTools.contains(ctx.toolName) {
+            Self.logger.info("Auto-approving \(ctx.toolName, privacy: .public) for session \(sessionId.prefix(8), privacy: .public)")
+            HookSocketServer.shared.respondToPermission(toolUseId: ctx.toolUseId, decision: "allow")
+            updateToolStatus(in: &session, toolId: ctx.toolUseId, status: .running)
+            if session.phase.canTransition(to: .processing) {
+                session.phase = .processing
+            }
         }
 
         sessions[sessionId] = session
@@ -414,6 +428,14 @@ actor SessionStore {
         }
 
         sessions[sessionId] = session
+    }
+
+    private func processPermissionApprovedAlways(sessionId: String, toolUseId: String, toolName: String) async {
+        guard var session = sessions[sessionId] else { return }
+        session.autoApprovedTools.insert(toolName)
+        sessions[sessionId] = session
+        // Reuse existing approval logic
+        await processPermissionApproved(sessionId: sessionId, toolUseId: toolUseId)
     }
 
     // MARK: - Tool Completion Processing

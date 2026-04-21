@@ -413,6 +413,7 @@ struct ChatView: View {
             tool: tool,
             toolInput: session.pendingToolInput,
             onApprove: { approvePermission() },
+            onApproveAlways: { approvePermissionAlways() },
             onDeny: { denyPermission() }
         )
     }
@@ -456,6 +457,10 @@ struct ChatView: View {
 
     private func approvePermission() {
         sessionMonitor.approvePermission(sessionId: sessionId)
+    }
+
+    private func approvePermissionAlways() {
+        sessionMonitor.approvePermissionAlways(sessionId: sessionId)
     }
 
     private func denyPermission() {
@@ -1117,15 +1122,16 @@ struct ChatApprovalBar: View {
     let tool: String
     let toolInput: String?
     let onApprove: () -> Void
+    let onApproveAlways: () -> Void
     let onDeny: () -> Void
 
     @State private var showContent = false
+    @State private var showAlwaysButton = false
     @State private var showAllowButton = false
     @State private var showDenyButton = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Tool info
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(MCPToolFormatter.formatToolName(tool))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -1142,14 +1148,11 @@ struct ChatApprovalBar: View {
 
             Spacer()
 
-            // Deny button
-            Button {
-                onDeny()
-            } label: {
+            Button { onDeny() } label: {
                 Text("Deny")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white.opacity(0.7))
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color.white.opacity(0.1))
                     .clipShape(Capsule())
@@ -1158,14 +1161,11 @@ struct ChatApprovalBar: View {
             .opacity(showDenyButton ? 1 : 0)
             .scaleEffect(showDenyButton ? 1 : 0.8)
 
-            // Allow button
-            Button {
-                onApprove()
-            } label: {
+            Button { onApprove() } label: {
                 Text("Allow")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.black)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color.white.opacity(0.95))
                     .clipShape(Capsule())
@@ -1173,8 +1173,21 @@ struct ChatApprovalBar: View {
             .buttonStyle(.plain)
             .opacity(showAllowButton ? 1 : 0)
             .scaleEffect(showAllowButton ? 1 : 0.8)
+
+            Button { onApproveAlways() } label: {
+                Text("Always")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.green.opacity(0.7))
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .opacity(showAlwaysButton ? 1 : 0)
+            .scaleEffect(showAlwaysButton ? 1 : 0.8)
         }
-        .frame(minHeight: 44)  // Consistent height with other bars
+        .frame(minHeight: 44)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.2))
@@ -1187,6 +1200,9 @@ struct ChatApprovalBar: View {
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.15)) {
                 showAllowButton = true
+            }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.7).delay(0.2)) {
+                showAlwaysButton = true
             }
         }
     }

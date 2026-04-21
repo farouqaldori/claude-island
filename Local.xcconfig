@@ -1,0 +1,9 @@
+// Local build configuration - not checked into git.
+// Override signing settings for local development.
+//
+// To use your own team ID, change DEVELOPMENT_TEAM below.
+// To build without signing at all, leave as-is (ad-hoc signing).
+
+DEVELOPMENT_TEAM =
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
