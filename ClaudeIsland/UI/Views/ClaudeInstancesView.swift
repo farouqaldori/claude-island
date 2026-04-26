@@ -24,11 +24,11 @@ struct ClaudeInstancesView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Text("No sessions")
+            Text(LString.noSessions.localized)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.4))
 
-            Text("Run claude in terminal")
+            Text(LString.runClaudeInTerminal.localized)
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
         }
@@ -149,17 +149,17 @@ struct InstanceRow: View {
     private var phaseStatusText: String {
         switch session.phase {
         case .processing:
-            return "Processing..."
+            return LString.processing.localized
         case .compacting:
-            return "Compacting..."
+            return LString.compacting.localized
         case .waitingForInput:
-            return "Ready"
+            return LString.ready.localized
         case .waitingForApproval:
-            return "Waiting for approval"
+            return LString.waitingForApproval.localized
         case .idle:
-            return "Idle"
+            return LString.idle.localized
         case .ended:
-            return "Ended"
+            return LString.ended.localized
         }
     }
 
@@ -193,7 +193,7 @@ struct InstanceRow: View {
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundColor(TerminalColors.amber.opacity(0.9))
                         if isInteractiveTool {
-                            Text("Needs your input")
+                            Text(LString.needsYourInput.localized)
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.5))
                                 .lineLimit(1)
@@ -224,7 +224,7 @@ struct InstanceRow: View {
                     case "user":
                         // User message - prefix with "You:"
                         HStack(spacing: 4) {
-                            Text("You:")
+                            Text(LString.you.localized)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.white.opacity(0.5))
                             if let msg = session.lastMessage {
@@ -379,7 +379,7 @@ struct InlineApprovalButtons: View {
             Button {
                 onReject()
             } label: {
-                Text("Deny")
+                Text(LString.deny.localized)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 10)
@@ -394,7 +394,7 @@ struct InlineApprovalButtons: View {
             Button {
                 onApprove()
             } label: {
-                Text("Allow")
+                Text(LString.allow.localized)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.black)
                     .padding(.horizontal, 10)
@@ -461,7 +461,7 @@ struct CompactTerminalButton: View {
             HStack(spacing: 2) {
                 Image(systemName: "terminal")
                     .font(.system(size: 8, weight: .medium))
-                Text("Go to Terminal")
+                Text(LString.goToTerminal.localized)
                     .font(.system(size: 10, weight: .medium))
             }
             .foregroundColor(isEnabled ? .white.opacity(0.9) : .white.opacity(0.3))
@@ -489,7 +489,7 @@ struct TerminalButton: View {
             HStack(spacing: 3) {
                 Image(systemName: "terminal")
                     .font(.system(size: 9, weight: .medium))
-                Text("Terminal")
+                Text(LString.terminal.localized)
                     .font(.system(size: 11, weight: .medium))
             }
             .foregroundColor(isEnabled ? .black : .white.opacity(0.4))
