@@ -96,6 +96,8 @@ struct NotchMenuView: View {
 
                 AccessibilityRow(isEnabled: AXIsProcessTrusted())
 
+                NotificationTestRow()
+
                 Divider()
                     .background(Color.white.opacity(0.08))
                     .padding(.vertical, 4)
@@ -644,5 +646,66 @@ struct LanguageRow: View {
 
     private var textColor: Color {
         .white.opacity(isHovered ? 1.0 : 0.7)
+    }
+}
+
+// MARK: - Notification Test Row
+
+struct NotificationTestRow: View {
+    @State private var isHovered = false
+    @State private var showSentIndicator = false
+
+    var body: some View {
+        Button {
+            sendTestNotification()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "bell")
+                    .font(.system(size: 12))
+                    .foregroundColor(textColor)
+                    .frame(width: 16)
+
+                Text(LString.notificationTest.localized)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(textColor)
+
+                Spacer()
+
+                if showSentIndicator {
+                    Text(LString.testNotificationSent.localized)
+                        .font(.system(size: 11))
+                        .foregroundColor(TerminalColors.green)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+
+    private var textColor: Color {
+        .white.opacity(isHovered ? 1.0 : 0.7)
+    }
+
+    private func sendTestNotification() {
+        Task {
+            await SystemNotificationService.shared.sendTaskCompletionNotification(sessionTitle: "Test Session")
+        }
+
+        // Show sent indicator briefly
+        showSentIndicator = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            showSentIndicator = false
+        }
     }
 }

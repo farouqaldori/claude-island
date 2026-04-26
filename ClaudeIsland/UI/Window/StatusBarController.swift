@@ -25,6 +25,10 @@ class StatusBarController {
     private var isReadyForInput: Bool = false
     private var isCompacting: Bool = false
 
+    // Track previous states for notification triggers
+    private var wasProcessing: Bool = false
+    private var wasCompacting: Bool = false
+
     // Animation timer for pulsing effect
     private var animationTimer: Timer?
     private var pulsePhase: Double = 0
@@ -81,10 +85,10 @@ class StatusBarController {
     // MARK: - Animation Timer
 
     private func startAnimationTimer() {
-        // 流动动画需要持续更新
+        // Flowing animation requires continuous updates
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            // 只有在需要动画的状态才更新
+            // Only update when animation states are active
             if self.isProcessing || self.hasPendingPermission || self.isCompacting || self.isReadyForInput {
                 self.pulsePhase += 0.02
                 if self.pulsePhase > 1.0 {
@@ -109,12 +113,35 @@ class StatusBarController {
     }
 
     private func updateState(from sessions: [SessionState]) {
+        // Track state transitions for notifications
+        let previouslyProcessing = wasProcessing
+        let previouslyCompacting = wasCompacting
+
+        // Update current states
         isProcessing = sessions.contains { $0.phase == .processing }
         isCompacting = sessions.contains { $0.phase == .compacting }
         hasPendingPermission = sessions.contains { $0.phase.isWaitingForApproval }
         isReadyForInput = sessions.contains { $0.phase == .waitingForInput }
 
+        // Store for next comparison
+        wasProcessing = isProcessing
+        wasCompacting = isCompacting
+
+        // Detect task completion: transition from processing/compacting to ready
+        // Only send notification if we were actively processing and now are ready
+        if (previouslyProcessing || previouslyCompacting) && !isProcessing && !isCompacting && isReadyForInput {
+            // Find the session that just completed to get its title
+            let completedSession = sessions.first { $0.phase == .waitingForInput }
+            sendTaskCompletionNotification(sessionTitle: completedSession?.displayTitle)
+        }
+
         updateIcon()
+    }
+
+    private func sendTaskCompletionNotification(sessionTitle: String?) {
+        Task {
+            await SystemNotificationService.shared.sendTaskCompletionNotification(sessionTitle: sessionTitle)
+        }
     }
 
     // MARK: - Icon Management
@@ -245,11 +272,11 @@ class StatusBarController {
 // MARK: - Status Bar Status Enum
 
 enum StatusBarStatus {
-    case idle           // 无活跃 session
-    case processing     // Claude 正在处理
-    case compacting     // 正在压缩上下文
-    case permissionWaiting  // 等待用户批准权限
-    case ready          // 等待用户输入
+    case idle           // No active session
+    case processing     // Claude is processing
+    case compacting     // Compressing context
+    case permissionWaiting  // Waiting for user permission approval
+    case ready          // Waiting for user input
 
     var color: Color {
         switch self {
@@ -305,43 +332,43 @@ struct StatusBarIconView: View {
 
     var body: some View {
         ZStack(alignment: .center) {
-            // 外层矩形框 - 状态指示器
+            // Outer rectangle frame - status indicator
             StatusBarFrame(status: status, pulsePhase: pulsePhase)
 
-            // 中间螃蟹图标（放大并向下偏移，避免头部与边框重叠）
+            // Center crab icon (scaled up and offset down to avoid head overlapping with frame)
             ClaudeCrabIcon(size: 16, animateLegs: status == .processing || status == .compacting)
-                .offset(y: 3)  // 向下移动3像素，头部在上，腿部可与边框重叠
+                .offset(y: 3)  // Move down 3 pixels, head stays on top, legs can overlap with frame
         }
         .frame(width: 28, height: 22)
     }
 }
 
-// MARK: - Status Bar Frame (矩形框状态指示器)
+// MARK: - Status Bar Frame (Rectangle status indicator)
 
 struct StatusBarFrame: View {
     let status: StatusBarStatus
     let pulsePhase: Double
 
-    // 矩形框尺寸（配合更大的螃蟹）
+    // Rectangle frame dimensions (matching larger crab)
     private let frameWidth: CGFloat = 26
     private let frameHeight: CGFloat = 20
     private let cornerRadius: CGFloat = 3
 
-    // 流动线条参数
+    // Flowing line parameters
     private let lineWidth: CGFloat = 2
 
     var body: some View {
         ZStack {
-            // 底层静态边框
+            // Base static border
             RoundedRectangle(cornerRadius: cornerRadius)
                 .stroke(borderColor, lineWidth: lineWidth)
                 .frame(width: frameWidth, height: frameHeight)
 
-            // 流动进度线（处理中/压缩中状态）
+            // Flowing progress line (processing/compacting states)
             if status == .processing || status == .compacting {
-                // dashPhase 让虚线沿着矩形边框"流动"
-                // 偏移量不断变化，产生流动效果
-                let phase = pulsePhase * 92  // 92 = 矩形周长 2*(26+20)
+                // dashPhase makes dashed line "flow" along the rectangle frame
+                // Offset changes continuously to create flowing effect
+                let phase = pulsePhase * 92  // 92 = rectangle perimeter 2*(26+20)
 
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .stroke(
@@ -349,14 +376,14 @@ struct StatusBarFrame: View {
                         style: StrokeStyle(
                             lineWidth: lineWidth + 1,
                             lineCap: .round,
-                            dash: [8, 84],  // 8px亮段 + 84px暗段 = 总长92px
+                            dash: [8, 84],  // 8px bright segment + 84px dark segment = total 92px
                             dashPhase: phase
                         )
                     )
                     .frame(width: frameWidth, height: frameHeight)
             }
 
-            // 任务完成状态：绿色填充 + 边框
+            // Task complete state: green fill + border
             if status == .ready {
                 RoundedRectangle(cornerRadius: cornerRadius)
                     .fill(TerminalColors.green.opacity(0.25))
@@ -367,7 +394,7 @@ struct StatusBarFrame: View {
                     .frame(width: frameWidth, height: frameHeight)
             }
 
-            // 权限等待状态：闪烁边框
+            // Permission waiting state: flashing border
             if status == .permissionWaiting {
                 let flashOpacity = 0.5 + 0.5 * sin(pulsePhase * 4 * .pi)
                 RoundedRectangle(cornerRadius: cornerRadius)
@@ -381,9 +408,9 @@ struct StatusBarFrame: View {
     private var borderColor: Color {
         switch status {
         case .idle:
-            return .clear  // 空闲时透明
+            return .clear  // Transparent when idle
         case .processing:
-            return TerminalColors.blue.opacity(0.2)  // 淡蓝色底框
+            return TerminalColors.blue.opacity(0.2)  // Light blue base frame
         case .compacting:
             return TerminalColors.amber.opacity(0.2)
         case .permissionWaiting:

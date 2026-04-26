@@ -123,4 +123,16 @@ struct LString {
     // MARK: - App Name
 
     static let vibeNotch = "vibeNotch"
+
+    // MARK: - Notifications
+
+    static let taskComplete = "taskComplete"
+    static let claudeReadyForInput = "claudeReadyForInput"
+    static let permissionRequired = "permissionRequired"
+    static let needsYourApproval = "needsYourApproval"
+
+    // MARK: - Notification Test
+
+    static let notificationTest = "notificationTest"
+    static let testNotificationSent = "testNotificationSent"
 }

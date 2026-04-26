@@ -3,8 +3,9 @@ import IOKit
 import Mixpanel
 import Sparkle
 import SwiftUI
+import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var windowManager: WindowManager?
     private var statusBarController: StatusBarController?
     private var notchViewModel: NotchViewModel?
@@ -69,6 +70,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         Mixpanel.mainInstance().track(event: "App Launched")
         Mixpanel.mainInstance().flush()
+
+        // Set up notification center delegate for foreground notifications
+        UNUserNotificationCenter.current().delegate = self
+        Task {
+            // Register notification categories
+            await registerNotificationCategories()
+            await SystemNotificationService.shared.requestAuthorization()
+        }
 
         HookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -190,6 +199,52 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let observer = displayModeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Register notification categories for alert-style notifications
+    private func registerNotificationCategories() async {
+        // Create action for "Open" button
+        let openAction = UNNotificationAction(
+            identifier: "OPEN_ACTION",
+            title: "打开",
+            options: [.foreground]
+        )
+
+        // Create category for task completion notifications
+        let taskCompleteCategory = UNNotificationCategory(
+            identifier: "TASK_COMPLETE",
+            actions: [openAction],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+
+        // Register categories
+        UNUserNotificationCenter.current().setNotificationCategories([taskCompleteCategory])
+        print("✅ Notification categories registered")
+    }
+
+    /// Allow notifications to be shown when app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show notification banner, play sound, and show badge even when app is in foreground
+        // Using .alert ensures it behaves like an alert notification
+        completionHandler([.alert, .sound, .badge])
+    }
+
+    /// Handle notification tap
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // Bring app to front when user taps notification
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        completionHandler()
     }
 
     private func getOrCreateDistinctId() -> String {

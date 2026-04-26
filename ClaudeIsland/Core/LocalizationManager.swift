@@ -198,7 +198,17 @@ private let englishStrings: [String: String] = [
     "statusBarMode": "StatusBar",
 
     // App Name
-    "vibeNotch": "Vibe Notch"
+    "vibeNotch": "Vibe Notch",
+
+    // Notifications
+    "taskComplete": "Task Complete",
+    "claudeReadyForInput": "Claude Code is ready for your input",
+    "permissionRequired": "Permission Required",
+    "needsYourApproval": "needs your approval",
+
+    // Notification Test
+    "notificationTest": "Test Notification",
+    "testNotificationSent": "Test notification sent"
 ]
 
 // MARK: - Chinese Strings
@@ -301,5 +311,15 @@ private let chineseStrings: [String: String] = [
     "statusBarMode": "状态栏",
 
     // App Name
-    "vibeNotch": "Vibe Notch"
+    "vibeNotch": "Vibe Notch",
+
+    // Notifications
+    "taskComplete": "任务完成",
+    "claudeReadyForInput": "Claude Code 已准备好接收输入",
+    "permissionRequired": "需要权限批准",
+    "needsYourApproval": "需要您的批准",
+
+    // Notification Test
+    "notificationTest": "测试通知",
+    "testNotificationSent": "测试通知已发送"
 ]
