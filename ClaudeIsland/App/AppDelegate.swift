@@ -6,8 +6,11 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowManager: WindowManager?
+    private var statusBarController: StatusBarController?
+    private var notchViewModel: NotchViewModel?
     private var screenObserver: ScreenObserver?
     private var updateCheckTimer: Timer?
+    private var displayModeObserver: NSObjectProtocol?
 
     static var shared: AppDelegate?
     let updater: SPUUpdater
@@ -70,8 +73,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         HookInstaller.installIfNeeded()
         NSApplication.shared.setActivationPolicy(.accessory)
 
+        // Initialize window manager and status bar controller
         windowManager = WindowManager()
-        _ = windowManager?.setupNotchWindow()
+
+        // Set up UI based on current display mode setting
+        setupUIForCurrentMode()
+
+        // Observe display mode changes
+        displayModeObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Check if display mode changed
+            self?.handleDisplayModeChange()
+        }
 
         screenObserver = ScreenObserver { [weak self] in
             self?.handleScreenChange()
@@ -87,14 +103,93 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func setupUIForCurrentMode() {
+        let mode = AppSettings.displayMode
+
+        switch mode {
+        case .notch:
+            _ = windowManager?.setupNotchWindow()
+            statusBarController?.teardown()
+
+        case .statusBar:
+            windowManager?.hideNotchWindow()
+            // Create a shared view model for status bar
+            if let controller = windowManager?.windowController {
+                notchViewModel = controller.viewModel
+                statusBarController = StatusBarController(viewModel: controller.viewModel)
+            } else {
+                // Create placeholder view model for status bar only
+                let placeholderVM = createPlaceholderViewModel()
+                notchViewModel = placeholderVM
+                statusBarController = StatusBarController(viewModel: placeholderVM)
+            }
+            statusBarController?.setup()
+        }
+    }
+
+    private func createPlaceholderViewModel() -> NotchViewModel {
+        // Create a minimal view model for status bar mode without notch geometry
+        let screen = NSScreen.main ?? NSScreen.screens.first!
+        let screenFrame = screen.frame
+        let notchSize = screen.notchSize
+
+        let deviceNotchRect = CGRect(
+            x: (screenFrame.width - notchSize.width) / 2,
+            y: 0,
+            width: notchSize.width,
+            height: notchSize.height
+        )
+
+        return NotchViewModel(
+            deviceNotchRect: deviceNotchRect,
+            screenRect: screenFrame,
+            windowHeight: 750,
+            hasPhysicalNotch: screen.hasPhysicalNotch
+        )
+    }
+
+    private var lastDisplayMode: DisplayMode = AppSettings.displayMode
+
+    private func handleDisplayModeChange() {
+        let newMode = AppSettings.displayMode
+        guard newMode != lastDisplayMode else { return }
+        lastDisplayMode = newMode
+
+        // Switch UI mode
+        switch newMode {
+        case .notch:
+            statusBarController?.teardown()
+            windowManager?.showNotchWindow()
+
+        case .statusBar:
+            windowManager?.hideNotchWindow()
+            if let vm = notchViewModel {
+                statusBarController = StatusBarController(viewModel: vm)
+            } else if let controller = windowManager?.windowController {
+                statusBarController = StatusBarController(viewModel: controller.viewModel)
+            } else {
+                statusBarController = StatusBarController(viewModel: createPlaceholderViewModel())
+            }
+            statusBarController?.setup()
+        }
+    }
+
     private func handleScreenChange() {
-        _ = windowManager?.setupNotchWindow()
+        // Only handle screen changes in notch mode
+        if AppSettings.displayMode == .notch {
+            _ = windowManager?.setupNotchWindow()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         Mixpanel.mainInstance().flush()
         updateCheckTimer?.invalidate()
         screenObserver = nil
+        statusBarController?.teardown()
+
+        if let observer = displayModeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     private func getOrCreateDistinctId() -> String {

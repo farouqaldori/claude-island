@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "FD33FD5C2EDF32D7002A6548"
-               BuildableName = "Claude Island.app"
+               BuildableName = "Vibe Notch.app"
                BlueprintName = "ClaudeIsland"
                ReferencedContainer = "container:ClaudeIsland.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FD33FD5C2EDF32D7002A6548"
-            BuildableName = "Claude Island.app"
+            BuildableName = "Vibe Notch.app"
             BlueprintName = "ClaudeIsland"
             ReferencedContainer = "container:ClaudeIsland.xcodeproj">
          </BuildableReference>
@@ -62,7 +62,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "FD33FD5C2EDF32D7002A6548"
-            BuildableName = "Claude Island.app"
+            BuildableName = "Vibe Notch.app"
             BlueprintName = "ClaudeIsland"
             ReferencedContainer = "container:ClaudeIsland.xcodeproj">
          </BuildableReference>

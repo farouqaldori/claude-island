@@ -31,6 +31,23 @@ enum NotificationSound: String, CaseIterable {
     }
 }
 
+/// Display mode for the app UI
+enum DisplayMode: String, CaseIterable {
+    case notch = "Notch"        // Dynamic Island style at screen top
+    case statusBar = "StatusBar"  // Menu bar icon with popover
+
+    var displayName: String {
+        rawValue
+    }
+
+    var icon: String {
+        switch self {
+        case .notch: return "rectangle.topthird.inset.filled"
+        case .statusBar: return "menubar.rectangle"
+        }
+    }
+}
+
 enum AppSettings {
     private static let defaults = UserDefaults.standard
 
@@ -39,6 +56,7 @@ enum AppSettings {
     private enum Keys {
         static let notificationSound = "notificationSound"
         static let claudeDirectoryName = "claudeDirectoryName"
+        static let displayMode = "displayMode"
     }
 
     // MARK: - Notification Sound
@@ -69,6 +87,23 @@ enum AppSettings {
         }
         set {
             defaults.set(newValue.trimmingCharacters(in: .whitespaces), forKey: Keys.claudeDirectoryName)
+            ClaudePaths.invalidateCache()
+        }
+    }
+
+    // MARK: - Display Mode
+
+    /// The UI display mode - notch (Dynamic Island) or status bar (menu bar icon)
+    static var displayMode: DisplayMode {
+        get {
+            guard let rawValue = defaults.string(forKey: Keys.displayMode),
+                  let mode = DisplayMode(rawValue: rawValue) else {
+                return .notch // Default to Notch mode
+            }
+            return mode
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.displayMode)
         }
     }
 }

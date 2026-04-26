@@ -20,6 +20,7 @@ struct NotchMenuView: View {
     @ObservedObject private var soundSelector = SoundSelector.shared
     @State private var hooksInstalled: Bool = false
     @State private var launchAtLogin: Bool = false
+    @State private var displayMode: DisplayMode = AppSettings.displayMode
 
     var body: some View {
         // ScrollView so the menu gracefully scrolls when content exceeds the
@@ -42,6 +43,16 @@ struct NotchMenuView: View {
                 ScreenPickerRow(screenSelector: screenSelector)
                 SoundPickerRow(soundSelector: soundSelector)
                 ClaudeDirPickerRow()
+
+                Divider()
+                    .background(Color.white.opacity(0.08))
+                    .padding(.vertical, 4)
+
+                // Display mode toggle
+                DisplayModeRow(currentMode: displayMode) { newMode in
+                    displayMode = newMode
+                    AppSettings.displayMode = newMode
+                }
 
                 Divider()
                     .background(Color.white.opacity(0.08))
@@ -128,6 +139,58 @@ struct NotchMenuView: View {
         hooksInstalled = HookInstaller.isInstalled()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         screenSelector.refreshScreens()
+        displayMode = AppSettings.displayMode
+    }
+}
+
+// MARK: - Display Mode Row
+
+struct DisplayModeRow: View {
+    let currentMode: DisplayMode
+    let onChange: (DisplayMode) -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            // Toggle between modes
+            let nextMode: DisplayMode = currentMode == .notch ? .statusBar : .notch
+            onChange(nextMode)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: currentMode.icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(textColor)
+                    .frame(width: 16)
+
+                Text("显示模式")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(textColor)
+
+                Spacer()
+
+                Text(currentMode.displayName)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+
+    private var textColor: Color {
+        .white.opacity(isHovered ? 1.0 : 0.7)
     }
 }
 

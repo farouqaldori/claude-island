@@ -15,6 +15,7 @@ class WindowManager {
     private(set) var windowController: NotchWindowController?
     private var isInitialLaunch = true
     private var currentScreenFrame: NSRect?
+    private var isHidden = false
 
     /// Set up or recreate the notch window
     func setupNotchWindow() -> NotchWindowController? {
@@ -50,5 +51,30 @@ class WindowManager {
         windowController?.showWindow(nil)
 
         return windowController
+    }
+
+    /// Hide the notch window (for status bar mode)
+    func hideNotchWindow() {
+        guard let controller = windowController else { return }
+        controller.window?.orderOut(nil)
+        isHidden = true
+        logger.debug("Notch window hidden")
+    }
+
+    /// Show the notch window (switching back to notch mode)
+    func showNotchWindow() {
+        guard let controller = windowController else {
+            // Recreate if needed
+            _ = setupNotchWindow()
+            return
+        }
+        controller.window?.makeKeyAndOrderFront(nil)
+        isHidden = false
+        logger.debug("Notch window shown")
+    }
+
+    /// Check if the notch window is currently hidden
+    func isNotchHidden() -> Bool {
+        return isHidden
     }
 }
