@@ -286,13 +286,13 @@ enum StatusBarStatus {
         case .idle:
             return ""
         case .processing:
-            return "处理中"
+            return LString.processing.localized
         case .compacting:
-            return "压缩中"
+            return LString.compacting.localized
         case .permissionWaiting:
-            return "等待批准"
+            return LString.waitingForApproval.localized
         case .ready:
-            return "就绪"
+            return LString.ready.localized
         }
     }
 }

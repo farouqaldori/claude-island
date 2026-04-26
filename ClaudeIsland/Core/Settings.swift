@@ -37,7 +37,10 @@ enum DisplayMode: String, CaseIterable {
     case statusBar = "StatusBar"  // Menu bar icon with popover
 
     var displayName: String {
-        rawValue
+        switch self {
+        case .notch: return LString.notchMode.localized
+        case .statusBar: return LString.statusBarMode.localized
+        }
     }
 
     var icon: String {

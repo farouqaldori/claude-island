@@ -32,7 +32,7 @@ struct ClaudeDirPickerRow: View {
                         .foregroundColor(textColor)
                         .frame(width: 16)
 
-                    Text("Claude Directory")
+                    Text(LString.claudeDirectory.localized)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(textColor)
 
@@ -62,7 +62,7 @@ struct ClaudeDirPickerRow: View {
             if isExpanded {
                 VStack(spacing: 2) {
                     ClaudeDirOptionRow(
-                        label: "Auto-detect",
+                        label: LString.autoDetect.localized,
                         sublabel: isCustom ? nil : resolvedAutoDetectPath,
                         isSelected: !isCustom
                     ) {
@@ -70,7 +70,7 @@ struct ClaudeDirPickerRow: View {
                     }
 
                     ClaudeDirOptionRow(
-                        label: "Choose folder…",
+                        label: LString.chooseFolder.localized,
                         sublabel: isCustom ? displayValue : nil,
                         isSelected: isCustom
                     ) {
@@ -96,7 +96,7 @@ struct ClaudeDirPickerRow: View {
 
     /// Short display string for the main row's right side.
     private var displayValue: String {
-        isCustom ? shortenedPath(currentValue) : "Auto-detect"
+        isCustom ? shortenedPath(currentValue) : LString.autoDetect.localized
     }
 
     /// What `Auto-detect` actually resolves to right now (for the sublabel).

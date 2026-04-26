@@ -30,7 +30,7 @@ struct NotchMenuView: View {
                 // Back button
                 MenuRow(
                     icon: "chevron.left",
-                    label: "Back"
+                    label: LString.back.localized
                 ) {
                     viewModel.toggleMenu()
                 }
@@ -54,6 +54,9 @@ struct NotchMenuView: View {
                     AppSettings.displayMode = newMode
                 }
 
+                // Language toggle
+                LanguageRow()
+
                 Divider()
                     .background(Color.white.opacity(0.08))
                     .padding(.vertical, 4)
@@ -61,7 +64,7 @@ struct NotchMenuView: View {
                 // System settings
                 MenuToggleRow(
                     icon: "power",
-                    label: "Launch at Login",
+                    label: LString.launchAtLogin.localized,
                     isOn: launchAtLogin
                 ) {
                     do {
@@ -79,7 +82,7 @@ struct NotchMenuView: View {
 
                 MenuToggleRow(
                     icon: "arrow.triangle.2.circlepath",
-                    label: "Hooks",
+                    label: LString.hooks.localized,
                     isOn: hooksInstalled
                 ) {
                     if hooksInstalled {
@@ -102,7 +105,7 @@ struct NotchMenuView: View {
 
                 MenuRow(
                     icon: "star",
-                    label: "Star on GitHub"
+                    label: LString.starOnGitHub.localized
                 ) {
                     if let url = URL(string: "https://github.com/farouqaldori/vibe-notch") {
                         NSWorkspace.shared.open(url)
@@ -115,7 +118,7 @@ struct NotchMenuView: View {
 
                 MenuRow(
                     icon: "xmark.circle",
-                    label: "Quit",
+                    label: LString.quit.localized,
                     isDestructive: true
                 ) {
                     NSApplication.shared.terminate(nil)
@@ -163,7 +166,7 @@ struct DisplayModeRow: View {
                     .foregroundColor(textColor)
                     .frame(width: 16)
 
-                Text("显示模式")
+                Text(LString.displayMode.localized)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(textColor)
 
@@ -267,7 +270,7 @@ struct UpdateRow: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(TerminalColors.green)
-                Text("Up to date")
+                Text(LString.upToDate.localized)
                     .font(.system(size: 11))
                     .foregroundColor(TerminalColors.green)
             }
@@ -320,7 +323,7 @@ struct UpdateRow: View {
             }
 
         case .error:
-            Text("Retry")
+            Text(LString.retry.localized)
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.5))
         }
@@ -375,23 +378,23 @@ struct UpdateRow: View {
     private var label: String {
         switch updateManager.state {
         case .idle:
-            return "Check for Updates"
+            return LString.checkForUpdates.localized
         case .checking:
-            return "Checking..."
+            return LString.checking.localized
         case .upToDate:
-            return "Check for Updates"
+            return LString.checkForUpdates.localized
         case .found:
-            return "Download Update"
+            return LString.downloadUpdate.localized
         case .downloading:
-            return "Downloading..."
+            return LString.downloading.localized
         case .extracting:
-            return "Extracting..."
+            return LString.extracting.localized
         case .readyToInstall:
-            return "Install & Relaunch"
+            return LString.installAndRelaunch.localized
         case .installing:
-            return "Installing..."
+            return LString.installing.localized
         case .error:
-            return "Update failed"
+            return LString.updateFailed.localized
         }
     }
 
@@ -454,7 +457,7 @@ struct AccessibilityRow: View {
                 .foregroundColor(textColor)
                 .frame(width: 16)
 
-            Text("Accessibility")
+            Text(LString.accessibility.localized)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(textColor)
 
@@ -465,12 +468,12 @@ struct AccessibilityRow: View {
                     .fill(TerminalColors.green)
                     .frame(width: 6, height: 6)
 
-                Text("On")
+                Text(LString.on.localized)
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.4))
             } else {
                 Button(action: openAccessibilitySettings) {
-                    Text("Enable")
+                    Text(LString.enable.localized)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.black)
                         .padding(.horizontal, 10)
@@ -574,9 +577,58 @@ struct MenuToggleRow: View {
                     .fill(isOn ? TerminalColors.green : Color.white.opacity(0.3))
                     .frame(width: 6, height: 6)
 
-                Text(isOn ? "On" : "Off")
+                Text(isOn ? LString.on.localized : LString.off.localized)
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+
+    private var textColor: Color {
+        .white.opacity(isHovered ? 1.0 : 0.7)
+    }
+}
+
+// MARK: - Language Row
+
+struct LanguageRow: View {
+    @ObservedObject private var localizationManager = LocalizationManager.shared
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            // Toggle between languages
+            let nextLanguage: AppLanguage = localizationManager.language == .english ? .chinese : .english
+            localizationManager.setLanguage(nextLanguage)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: localizationManager.language.icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(textColor)
+                    .frame(width: 16)
+
+                Text(LString.language.localized)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(textColor)
+
+                Spacer()
+
+                Text(localizationManager.language.displayName)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.3))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
