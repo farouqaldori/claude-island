@@ -1126,6 +1126,10 @@ actor SessionStore {
                 await self?.process(.clearDetected(sessionId: sessionId))
             }
 
+            // Always update conversationInfo (lastMessage, summary, etc.)
+            // even when there are no new chat messages to process
+            await self?.updateConversationInfo(sessionId: sessionId, cwd: cwd)
+
             guard !result.newMessages.isEmpty || result.clearDetected else {
                 return
             }
@@ -1142,6 +1146,18 @@ actor SessionStore {
 
             await self?.process(.fileUpdated(payload))
         }
+    }
+
+    /// Update conversationInfo (lastMessage, summary, etc.) independently of chat item processing
+    private func updateConversationInfo(sessionId: String, cwd: String) async {
+        guard var session = sessions[sessionId] else { return }
+        let conversationInfo = await ConversationParser.shared.parse(
+            sessionId: sessionId,
+            cwd: cwd
+        )
+        session.conversationInfo = conversationInfo
+        sessions[sessionId] = session
+        publishState()
     }
 
     private func cancelPendingSync(sessionId: String) {
