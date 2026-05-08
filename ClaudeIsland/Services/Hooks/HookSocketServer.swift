@@ -25,6 +25,9 @@ struct HookEvent: Codable, Sendable {
     let toolUseId: String?
     let notificationType: String?
     let message: String?
+    let toolResult: String?
+    let resolvedTaskId: String?
+    let resolvedTaskSubject: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -33,10 +36,13 @@ struct HookEvent: Codable, Sendable {
         case toolUseId = "tool_use_id"
         case notificationType = "notification_type"
         case message
+        case toolResult = "tool_result"
+        case resolvedTaskId = "resolved_task_id"
+        case resolvedTaskSubject = "resolved_task_subject"
     }
 
     /// Create a copy with updated toolUseId
-    init(sessionId: String, cwd: String, event: String, status: String, pid: Int?, tty: String?, tool: String?, toolInput: [String: AnyCodable]?, toolUseId: String?, notificationType: String?, message: String?) {
+    init(sessionId: String, cwd: String, event: String, status: String, pid: Int?, tty: String?, tool: String?, toolInput: [String: AnyCodable]?, toolUseId: String?, notificationType: String?, message: String?, toolResult: String? = nil, resolvedTaskId: String? = nil, resolvedTaskSubject: String? = nil) {
         self.sessionId = sessionId
         self.cwd = cwd
         self.event = event
@@ -48,6 +54,9 @@ struct HookEvent: Codable, Sendable {
         self.toolUseId = toolUseId
         self.notificationType = notificationType
         self.message = message
+        self.toolResult = toolResult
+        self.resolvedTaskId = resolvedTaskId
+        self.resolvedTaskSubject = resolvedTaskSubject
     }
 
     var sessionPhase: SessionPhase {

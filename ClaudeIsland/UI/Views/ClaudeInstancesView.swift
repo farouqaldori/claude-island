@@ -185,6 +185,13 @@ struct InstanceRow: View {
                     }
                 }
 
+                if session.displayTitle != session.projectName {
+                    Text(session.projectName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
+                }
+
                 // Show tool call when waiting for approval, otherwise last activity
                 if isWaitingForApproval, let toolName = session.pendingToolName {
                     // Show tool name in amber + input on same line

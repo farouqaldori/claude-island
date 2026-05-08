@@ -43,6 +43,19 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// State for Task tools and their nested subagent tools
     var subagentState: SubagentState
 
+    // MARK: - Task Tracking
+
+    /// Tasks created via TaskCreate/TaskUpdate tool calls
+    var tasks: [TaskItem]
+
+    // MARK: - Plan Content
+
+    /// Markdown content of the current plan (from ExitPlanMode)
+    var planContent: String?
+
+    /// Path to the plan file for this session (resolved from ExitPlanMode events)
+    var planFilePath: URL?
+
     // MARK: - Conversation Info (from JSONL parsing)
 
     var conversationInfo: ConversationInfo
@@ -75,6 +88,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         chatItems: [ChatHistoryItem] = [],
         toolTracker: ToolTracker = ToolTracker(),
         subagentState: SubagentState = SubagentState(),
+        tasks: [TaskItem] = [],
+        planContent: String? = nil,
         conversationInfo: ConversationInfo = ConversationInfo(
             summary: nil, lastMessage: nil, lastMessageRole: nil,
             lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
@@ -93,6 +108,8 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.chatItems = chatItems
         self.toolTracker = toolTracker
         self.subagentState = subagentState
+        self.tasks = tasks
+        self.planContent = planContent
         self.conversationInfo = conversationInfo
         self.needsClearReconciliation = needsClearReconciliation
         self.lastActivity = lastActivity
@@ -347,4 +364,68 @@ struct TaskContext: Equatable, Sendable {
     var agentId: String?
     var description: String?
     var subagentTools: [SubagentToolCall]
+}
+
+// MARK: - Task Item
+
+/// A task tracked via TaskCreate/TaskUpdate tool calls
+struct TaskItem: Equatable, Identifiable, Sendable {
+    var id: String
+    var subject: String
+    var status: TaskStatus
+
+    enum TaskStatus: String, Sendable {
+        case pending
+        case inProgress = "in_progress"
+        case completed
+        case deleted
+    }
+}
+
+// MARK: - Task Management
+
+extension SessionState {
+    /// Add a new task with a temporary placeholder ID
+    mutating func addTask(subject: String) {
+        let tempId = "_t\(tasks.count)"
+        tasks.append(TaskItem(id: tempId, subject: subject, status: .pending))
+    }
+
+    /// Reset all tasks for a new prompt turn
+    mutating func resetTasks() {
+        tasks.removeAll()
+    }
+
+    /// Resolve a temp task's real ID by matching its subject
+    mutating func resolveTaskId(subject: String, realId: String) {
+        if let idx = tasks.firstIndex(where: { $0.id.hasPrefix("_t") && $0.subject == subject }) {
+            tasks[idx].id = realId
+        }
+    }
+
+    /// Update task status by ID
+    mutating func updateTask(taskId: String, status: TaskItem.TaskStatus) {
+        if let idx = tasks.firstIndex(where: { $0.id == taskId }) {
+            if status == .deleted {
+                tasks.remove(at: idx)
+            } else {
+                tasks[idx].status = status
+            }
+            return
+        }
+        // Fallback: unknown task — create entry
+        if status != .deleted {
+            tasks.append(TaskItem(id: taskId, subject: "Task #\(taskId)", status: status))
+        }
+    }
+
+    /// Remove old pending tasks with temp IDs that were never resolved
+    mutating func pruneStaleTemporaryTasks() {
+        tasks.removeAll { $0.id.hasPrefix("_t") && $0.status == .pending }
+    }
+
+    /// Remove completed tasks to keep the visible list concise
+    mutating func pruneCompletedTasks() {
+        tasks.removeAll { $0.status == .completed }
+    }
 }

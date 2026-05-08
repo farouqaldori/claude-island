@@ -162,6 +162,19 @@ actor SessionStore {
 
         processToolTracking(event: event, session: &session)
         processSubagentTracking(event: event, session: &session)
+        processTaskTracking(event: event, session: &session)
+
+        // Debug: log tool names to diagnose plan tracking
+        if let tool = event.tool {
+            Self.logger.debug("Hook event: \(event.event, privacy: .public) tool=\(tool, privacy: .public)")
+        }
+        processPlanTracking(event: event, session: &session)
+
+        if event.event == "UserPromptSubmit" {
+            session.resetTasks()
+            session.planContent = nil
+            session.planFilePath = nil
+        }
 
         if event.event == "Stop" {
             session.subagentState = SubagentState()
@@ -315,6 +328,98 @@ actor SessionStore {
 
         default:
             break
+        }
+    }
+
+    private func processTaskTracking(event: HookEvent, session: inout SessionState) {
+        switch event.event {
+        case "PreToolUse":
+            guard let toolName = event.tool else { return }
+
+            if toolName == "TaskCreate" {
+                if let subject = event.toolInput?["subject"]?.value as? String {
+                    session.addTask(subject: subject)
+                    Self.logger.debug("TaskCreate: added task '\(subject, privacy: .public)'")
+                }
+            } else if toolName == "TaskUpdate" {
+                if let taskId = event.toolInput?["taskId"]?.value as? String {
+                    let existingIds = session.tasks.map { $0.id }.joined(separator: ", ")
+                    Self.logger.debug("TaskUpdate: looking for \(taskId, privacy: .public) in [\(existingIds, privacy: .public)]")
+                    if let statusStr = event.toolInput?["status"]?.value as? String,
+                       let status = TaskItem.TaskStatus(rawValue: statusStr) {
+                        session.updateTask(taskId: taskId, status: status)
+                        Self.logger.debug("TaskUpdate: \(taskId, privacy: .public) → \(statusStr, privacy: .public)")
+                    }
+                    if let subject = event.toolInput?["subject"]?.value as? String,
+                       let idx = session.tasks.firstIndex(where: { $0.id == taskId }) {
+                        session.tasks[idx].subject = subject
+                    }
+                }
+            } else if toolName == "TaskList" {
+                session.pruneStaleTemporaryTasks()
+                session.pruneCompletedTasks()
+            }
+
+        case "PostToolUse":
+            guard event.tool == "TaskCreate" else { return }
+
+            // Primary: use resolved_task_id from tool_response (parsed by Python)
+            if let realId = event.resolvedTaskId {
+                let subject = event.resolvedTaskSubject
+                    ?? event.toolInput?["subject"]?.value as? String
+                if let subject {
+                    session.resolveTaskId(subject: subject, realId: realId)
+                } else if let idx = session.tasks.firstIndex(where: { $0.id.hasPrefix("_t") }) {
+                    session.tasks[idx].id = realId
+                }
+                Self.logger.debug("TaskCreate resolved: id=\(realId, privacy: .public)")
+            }
+            // Fallback: parse from tool_result string "Task #8 created..."
+            else if let result = event.toolResult {
+                if let range = result.range(of: #"Task #(\d+)"#, options: .regularExpression),
+                   let idRange = result[range].range(of: #"\d+"#, options: .regularExpression) {
+                    let realId = String(result[idRange])
+                    if let inputSubject = event.toolInput?["subject"]?.value as? String {
+                        session.resolveTaskId(subject: inputSubject, realId: realId)
+                    } else if let idx = session.tasks.firstIndex(where: { $0.id.hasPrefix("_t") }) {
+                        session.tasks[idx].id = realId
+                    }
+                    Self.logger.debug("TaskCreate resolved (fallback): id=\(realId, privacy: .public)")
+                }
+            }
+
+        default:
+            break
+        }
+    }
+
+    // MARK: - Plan Tracking
+
+    private func processPlanTracking(event: HookEvent, session: inout SessionState) {
+        guard let toolName = event.tool else { return }
+        let isPlanTool = toolName == "ExitPlanMode"
+            || toolName == "exit_plan_mode"
+            || toolName.lowercased().contains("exitplanmode")
+            || toolName.lowercased().contains("planmode")
+
+        guard isPlanTool else { return }
+
+        // Extract plan content and file path directly from toolInput
+        if let input = event.toolInput {
+            if let planContent = input["plan"]?.value as? String, !planContent.isEmpty {
+                session.planContent = planContent
+                Self.logger.debug("Plan loaded from toolInput (\(planContent.count) chars)")
+            }
+            if let pathStr = input["planFilePath"]?.value as? String, !pathStr.isEmpty {
+                session.planFilePath = URL(fileURLWithPath: pathStr)
+            }
+        }
+
+        // Fallback: read from known file path
+        if session.planContent == nil, let path = session.planFilePath,
+           let content = try? String(contentsOf: path, encoding: .utf8) {
+            session.planContent = content
+            Self.logger.debug("Plan loaded from file: \(path.lastPathComponent, privacy: .public)")
         }
     }
 
@@ -1021,6 +1126,10 @@ actor SessionStore {
                 await self?.process(.clearDetected(sessionId: sessionId))
             }
 
+            // Always update conversationInfo (lastMessage, summary, etc.)
+            // even when there are no new chat messages to process
+            await self?.updateConversationInfo(sessionId: sessionId, cwd: cwd)
+
             guard !result.newMessages.isEmpty || result.clearDetected else {
                 return
             }
@@ -1037,6 +1146,18 @@ actor SessionStore {
 
             await self?.process(.fileUpdated(payload))
         }
+    }
+
+    /// Update conversationInfo (lastMessage, summary, etc.) independently of chat item processing
+    private func updateConversationInfo(sessionId: String, cwd: String) async {
+        guard var session = sessions[sessionId] else { return }
+        let conversationInfo = await ConversationParser.shared.parse(
+            sessionId: sessionId,
+            cwd: cwd
+        )
+        session.conversationInfo = conversationInfo
+        sessions[sessionId] = session
+        publishState()
     }
 
     private func cancelPendingSync(sessionId: String) {
