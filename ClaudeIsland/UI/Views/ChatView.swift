@@ -197,6 +197,15 @@ struct ChatView: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                if session.usage.totalTokens > 0 {
+                    Text(session.usage.formattedTotal)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -353,14 +362,14 @@ struct ChatView: View {
 
     // MARK: - Input Bar
 
-    /// Can send messages only if session is in tmux
+    /// Can send messages when TTY is known (tmux or plain Terminal via AppleScript)
     private var canSendMessages: Bool {
-        session.isInTmux && session.tty != nil
+        session.tty != nil
     }
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+            TextField(canSendMessages ? "Message Claude..." : "No active Claude session", text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
@@ -479,12 +488,51 @@ struct ChatView: View {
     }
 
     private func sendToSession(_ text: String) async {
-        guard session.isInTmux else { return }
         guard let tty = session.tty else { return }
 
-        if let target = await findTmuxTarget(tty: tty) {
+        // Try tmux first
+        if session.isInTmux, let target = await findTmuxTarget(tty: tty) {
             _ = await ToolApprovalHandler.shared.sendMessage(text, to: target)
+            return
         }
+
+        // Fall back: AppleScript keystroke injection into the Terminal window
+        await sendViaAppleScript(text: text, tty: tty)
+    }
+
+    private func sendViaAppleScript(text: String, tty: String) async {
+        let escapedTTY = tty.replacingOccurrences(of: "\"", with: "\\\"")
+        // Escape backslashes then quotes for AppleScript string literal
+        let escapedText = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
+        let script = """
+        tell application "Terminal"
+            activate
+            set targetTTY to "\(escapedTTY)"
+            repeat with w in windows
+                repeat with t in tabs of w
+                    if tty of t is targetTTY then
+                        set selected tab of w to t
+                        set index of w to 1
+                        exit repeat
+                    end if
+                end repeat
+            end repeat
+        end tell
+        delay 0.25
+        tell application "System Events"
+            keystroke "\(escapedText)"
+            keystroke return
+        end tell
+        """
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", script]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     private func findTmuxTarget(tty: String) async -> TmuxTarget? {
