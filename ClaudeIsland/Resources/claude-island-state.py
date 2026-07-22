@@ -15,13 +15,13 @@ TIMEOUT_SECONDS = 300  # 5 minutes for permission decisions
 
 def get_tty():
     """Get the TTY of the Claude process (parent)"""
-    import subprocess
-
     # Get parent PID (Claude process)
     ppid = os.getppid()
 
     # Try to get TTY from ps command for the parent process
     try:
+        import subprocess
+
         result = subprocess.run(
             ["ps", "-p", str(ppid), "-o", "tty="],
             capture_output=True,
