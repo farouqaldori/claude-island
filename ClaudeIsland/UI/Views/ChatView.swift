@@ -24,6 +24,8 @@ struct ChatView: View {
     @State private var newMessageCount: Int = 0
     @State private var previousHistoryCount: Int = 0
     @State private var isBottomVisible: Bool = true
+    @State private var questionIndex: Int = 0
+    @State private var selectedOptions: Set<Int> = []
     @FocusState private var isInputFocused: Bool
 
     init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
@@ -419,12 +421,60 @@ struct ChatView: View {
 
     // MARK: - Interactive Prompt Bar
 
+    /// The unanswered AskUserQuestion of this session, if any
+    private var pendingQuestionSet: PendingQuestionSet? {
+        guard let item = history.last(where: { item in
+            guard case .toolCall(let tool) = item.type else { return false }
+            return tool.name == "AskUserQuestion"
+        }), case .toolCall(let tool) = item.type, tool.result == nil else { return nil }
+
+        return PendingQuestionSet.parse(toolUseId: item.id, input: tool.input)
+    }
+
     /// Bar for interactive tools like AskUserQuestion that need terminal input
+    @ViewBuilder
     private var interactivePromptBar: some View {
-        ChatInteractivePromptBar(
-            isInTmux: session.isInTmux,
-            onGoToTerminal: { focusTerminal() }
-        )
+        if let set = pendingQuestionSet, session.isInTmux,
+           questionIndex < set.questions.count {
+            QuestionAnswerBar(
+                question: set.questions[questionIndex],
+                questionNumber: questionIndex + 1,
+                questionCount: set.questions.count,
+                selected: $selectedOptions,
+                onSubmit: { numbers, multiSelect in
+                    answerQuestion(numbers: numbers, multiSelect: multiSelect)
+                }
+            )
+            .id("\(set.toolUseId)-\(questionIndex)")
+            .onChange(of: set.toolUseId) { _, _ in
+                questionIndex = 0
+                selectedOptions = []
+            }
+        } else {
+            ChatInteractivePromptBar(
+                isInTmux: session.isInTmux,
+                onGoToTerminal: { focusTerminal() }
+            )
+        }
+    }
+
+    /// Send the chosen option numbers to the terminal picker
+    private func answerQuestion(numbers: [Int], multiSelect: Bool) {
+        guard let tty = session.tty else { return }
+
+        // Advance locally: the picker moves to the next question immediately,
+        // and the JSONL result only lands once every question is answered
+        questionIndex += 1
+        selectedOptions = []
+
+        Task {
+            guard let target = await findTmuxTarget(tty: tty) else { return }
+            _ = await ToolApprovalHandler.shared.answerQuestion(
+                optionNumbers: numbers,
+                multiSelect: multiSelect,
+                to: target
+            )
+        }
     }
 
     // MARK: - Autoscroll Management
@@ -505,8 +555,10 @@ struct ChatView: View {
 
                 let target = parts[0]
                 let paneTty = parts[1].replacingOccurrences(of: "/dev/", with: "")
+                // Hook-reported TTYs carry the /dev/ prefix, pane TTYs may not
+                let sessionTty = tty.replacingOccurrences(of: "/dev/", with: "")
 
-                if paneTty == tty {
+                if paneTty == sessionTty {
                     return TmuxTarget(from: target)
                 }
             }
@@ -1043,6 +1095,109 @@ struct InterruptedMessageView: View {
                 .foregroundColor(.red)
             Spacer()
         }
+    }
+}
+
+// MARK: - Question Answer Bar
+
+/// Clickable options for a pending AskUserQuestion, answered straight from the notch
+struct QuestionAnswerBar: View {
+    let question: PendingQuestion
+    let questionNumber: Int
+    let questionCount: Int
+    @Binding var selected: Set<Int>
+    let onSubmit: ([Int], Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(question.header)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(TerminalColors.amber)
+
+                if questionCount > 1 {
+                    Text("\(questionNumber)/\(questionCount)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+
+                Spacer()
+
+                if question.multiSelect && !selected.isEmpty {
+                    Button {
+                        onSubmit(selected.sorted(), true)
+                    } label: {
+                        Text("Send \(selected.count)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.white.opacity(0.95)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(question.question)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 4) {
+                ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
+                    optionRow(index: index, option: option)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.2))
+    }
+
+    private func optionRow(index: Int, option: PendingQuestionOption) -> some View {
+        let number = index + 1
+        let isSelected = selected.contains(number)
+
+        return Button {
+            if question.multiSelect {
+                if isSelected { selected.remove(number) } else { selected.insert(number) }
+            } else {
+                onSubmit([number], false)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Text("\(number)")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(isSelected ? .black : .white.opacity(0.5))
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.08)))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                        .multilineTextAlignment(.leading)
+
+                    if !option.description.isEmpty {
+                        Text(option.description)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.45))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.white.opacity(0.12) : Color.white.opacity(0.05))
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

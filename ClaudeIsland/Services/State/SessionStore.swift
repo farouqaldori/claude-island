@@ -187,6 +187,29 @@ actor SessionStore {
         )
     }
 
+    /// Flatten a hook's tool_input into strings. Nested arrays/objects
+    /// (e.g. AskUserQuestion's `questions`) are kept as raw JSON instead of
+    /// being dropped, so the UI can decode them.
+    private static func flattenHookInput(_ hookInput: [String: AnyCodable]?) -> [String: String] {
+        var input: [String: String] = [:]
+        guard let hookInput else { return input }
+
+        for (key, value) in hookInput {
+            if let str = value.value as? String {
+                input[key] = str
+            } else if let num = value.value as? Int {
+                input[key] = String(num)
+            } else if let bool = value.value as? Bool {
+                input[key] = bool ? "true" : "false"
+            } else if JSONSerialization.isValidJSONObject([value.value]),
+                      let data = try? JSONSerialization.data(withJSONObject: value.value),
+                      let json = String(data: data, encoding: .utf8) {
+                input[key] = json
+            }
+        }
+        return input
+    }
+
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
         switch event.event {
         case "PreToolUse":
@@ -202,18 +225,7 @@ actor SessionStore {
 
                 let toolExists = session.chatItems.contains { $0.id == toolUseId }
                 if !toolExists {
-                    var input: [String: String] = [:]
-                    if let hookInput = event.toolInput {
-                        for (key, value) in hookInput {
-                            if let str = value.value as? String {
-                                input[key] = str
-                            } else if let num = value.value as? Int {
-                                input[key] = String(num)
-                            } else if let bool = value.value as? Bool {
-                                input[key] = bool ? "true" : "false"
-                            }
-                        }
-                    }
+                    let input = Self.flattenHookInput(event.toolInput)
 
                     let placeholderItem = ChatHistoryItem(
                         id: toolUseId,
@@ -688,6 +700,8 @@ actor SessionStore {
             structuredResults: payload.structuredResults
         )
 
+        updateQuestionPhase(&session)
+
         sessions[payload.sessionId] = session
 
         await emitToolCompletionEvents(
@@ -697,6 +711,43 @@ actor SessionStore {
             toolResults: payload.toolResults,
             structuredResults: payload.structuredResults
         )
+    }
+
+    /// Reflect an unanswered AskUserQuestion in the session phase.
+    ///
+    /// No hook fires while the picker is on screen (PostToolUse only arrives once
+    /// the user has answered), so the JSONL tool_use block is the only live signal.
+    /// Marking it as waitingForApproval reuses every existing "needs attention"
+    /// affordance in the UI.
+    private func updateQuestionPhase(_ session: inout SessionState) {
+        let pending = session.chatItems.last { item in
+            guard case .toolCall(let tool) = item.type else { return false }
+            return tool.name == "AskUserQuestion"
+        }
+
+        var pendingId: String?
+        if let pending, case .toolCall(let tool) = pending.type,
+           tool.result == nil, tool.status == .running || tool.status == .waitingForApproval {
+            pendingId = pending.id
+        }
+
+        if let pendingId {
+            guard session.phase.approvalToolName != "AskUserQuestion" else { return }
+            let context = PermissionContext(
+                toolUseId: pendingId,
+                toolName: "AskUserQuestion",
+                toolInput: nil,
+                receivedAt: Date()
+            )
+            if let next = session.phase.transition(to: .waitingForApproval(context)) {
+                session.phase = next
+            }
+        } else if session.phase.approvalToolName == "AskUserQuestion" {
+            // Answered (or interrupted) — hand the session back to its normal flow
+            if let next = session.phase.transition(to: .processing) {
+                session.phase = next
+            }
+        }
     }
 
     /// Populate subagent tools for Task/Agent tools using their agent JSONL files

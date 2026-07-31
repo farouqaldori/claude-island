@@ -641,6 +641,12 @@ actor ConversationParser {
                     input[key] = String(intValue)
                 } else if let boolValue = value as? Bool {
                     input[key] = boolValue ? "true" : "false"
+                } else if JSONSerialization.isValidJSONObject([value]),
+                          let data = try? JSONSerialization.data(withJSONObject: value),
+                          let json = String(data: data, encoding: .utf8) {
+                    // Nested arrays/objects (e.g. AskUserQuestion's `questions`) are kept
+                    // as raw JSON so callers can decode them instead of losing them
+                    input[key] = json
                 }
             }
         }

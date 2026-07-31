@@ -48,6 +48,29 @@ actor ToolApprovalHandler {
         await sendKeys(to: target, keys: message, pressEnter: true)
     }
 
+    /// Answer an AskUserQuestion picker.
+    ///
+    /// The picker lists options as `1.`, `2.`, … and a bare digit selects and
+    /// submits immediately. For multi-select questions each digit toggles an
+    /// option and Return confirms the set.
+    func answerQuestion(optionNumbers: [Int], multiSelect: Bool, to target: TmuxTarget) async -> Bool {
+        guard !optionNumbers.isEmpty else { return false }
+
+        for number in optionNumbers {
+            guard await sendKeys(to: target, keys: String(number), pressEnter: false) else {
+                return false
+            }
+            if multiSelect {
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+        }
+
+        guard multiSelect else { return true }
+
+        try? await Task.sleep(for: .milliseconds(120))
+        return await sendKeys(to: target, keys: "", pressEnter: true)
+    }
+
     // MARK: - Private Methods
 
     private func sendKeys(to target: TmuxTarget, keys: String, pressEnter: Bool) async -> Bool {
