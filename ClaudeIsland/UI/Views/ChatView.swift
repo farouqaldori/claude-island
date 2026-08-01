@@ -469,6 +469,7 @@ struct ChatView: View {
                         numbers: numbers,
                         labels: labels,
                         multiSelect: multiSelect,
+                        optionCount: question.options.count,
                         isLastQuestion: index + 1 == set.questions.count,
                         toolUseId: set.toolUseId
                     )
@@ -492,6 +493,7 @@ struct ChatView: View {
         numbers: [Int],
         labels: [String],
         multiSelect: Bool,
+        optionCount: Int,
         isLastQuestion: Bool,
         toolUseId: String
     ) {
@@ -516,6 +518,7 @@ struct ChatView: View {
             let sent = await ToolApprovalHandler.shared.answerQuestion(
                 optionNumbers: numbers,
                 multiSelect: multiSelect,
+                optionCount: optionCount,
                 confirmReview: isLastQuestion,
                 to: target
             )

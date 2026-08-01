@@ -62,6 +62,7 @@ actor ToolApprovalHandler {
     func answerQuestion(
         optionNumbers: [Int],
         multiSelect: Bool,
+        optionCount: Int,
         confirmReview: Bool,
         to target: TmuxTarget
     ) async -> Bool {
@@ -69,12 +70,29 @@ actor ToolApprovalHandler {
 
         NotchLog.write("answer", "target=\(target.targetString) picks=\(optionNumbers) multi=\(multiSelect) confirmReview=\(confirmReview)")
 
-        // A picker that isn't on screen means the keystrokes would land in a
-        // shell — the single most likely way an answer silently disappears
+        // tmux copy mode swallows keys outright, so that one is always undone
+        await leaveCopyMode(target: target)
+
         let before = await capturePane(target: target) ?? ""
-        guard before.contains("to navigate") || before.contains("Enter to select") else {
-            NotchLog.write("answer", "ABORT: no picker in pane \(target.targetString). tail=\(Self.tail(before))")
-            return false
+        let pickerVisible = before.contains("to navigate") || before.contains("Enter to select")
+
+        // Scrolling Claude Code's own view (mouse wheel) pushes the picker off
+        // screen while the keys still reach it. Nothing sent over tmux scrolls
+        // it back, so send the answer without reading the screen instead of
+        // failing for a reason the user can't see from the notch.
+        if !pickerVisible {
+            guard before.contains("Jump to bottom") || before.contains("to scroll") else {
+                NotchLog.write("answer", "ABORT: no picker in pane \(target.targetString). tail=\(Self.tail(before))")
+                return false
+            }
+            NotchLog.write("answer", "picker scrolled out of view — sending blind")
+            return await answerBlind(
+                optionNumbers: optionNumbers,
+                multiSelect: multiSelect,
+                optionCount: optionCount,
+                confirmReview: confirmReview,
+                to: target
+            )
         }
 
         for number in optionNumbers.sorted() {
@@ -118,6 +136,69 @@ actor ToolApprovalHandler {
     }
 
     // MARK: - Private Methods
+
+    /// Leave copy mode (scrollback) so the pane shows and accepts live input
+    private func leaveCopyMode(target: TmuxTarget) async {
+        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else { return }
+        let inMode = try? await ProcessExecutor.shared.run(
+            tmuxPath,
+            arguments: ["display-message", "-p", "-t", target.targetString, "#{pane_in_mode}"]
+        )
+        guard inMode?.trimmingCharacters(in: .whitespacesAndNewlines) == "1" else { return }
+
+        _ = try? await ProcessExecutor.shared.run(
+            tmuxPath,
+            arguments: ["send-keys", "-X", "-t", target.targetString, "cancel"]
+        )
+        try? await Task.sleep(for: .milliseconds(120))
+        NotchLog.write("answer", "left copy mode in \(target.targetString) (pane was scrolled up)")
+    }
+
+    /// Answer without reading the screen, for a picker scrolled out of view.
+    /// The cursor sits on the first row of a freshly opened question, so rows
+    /// are counted from there. Success can't be confirmed, so this trusts the
+    /// keys landed — the alternative is refusing to answer at all.
+    private func answerBlind(
+        optionNumbers: [Int],
+        multiSelect: Bool,
+        optionCount: Int,
+        confirmReview: Bool,
+        to target: TmuxTarget
+    ) async -> Bool {
+        var cursor = 1
+
+        for number in optionNumbers.sorted() {
+            for _ in 0..<max(0, number - cursor) {
+                guard await sendKey(named: "Down", to: target) else { return false }
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+            cursor = number
+
+            guard await sendKey(named: "Enter", to: target) else { return false }
+            try? await Task.sleep(for: .milliseconds(120))
+
+            // A single-select answer moves on to the next question, which
+            // starts with the cursor back on its first row
+            if !multiSelect { cursor = 1 }
+        }
+
+        if multiSelect {
+            // Rows past the options: "Type something", then "Submit"
+            for _ in 0..<max(0, optionCount + 2 - cursor) {
+                guard await sendKey(named: "Down", to: target) else { return false }
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+            guard await sendKey(named: "Enter", to: target) else { return false }
+        }
+
+        if confirmReview {
+            try? await Task.sleep(for: .milliseconds(400))
+            _ = await sendKey(named: "Enter", to: target)
+        }
+
+        NotchLog.write("answer", "blind send finished (unverified)")
+        return true
+    }
 
     /// Walk the cursor down until it sits on the row `matches` accepts.
     /// Long labels wrap onto a second line, so rows are matched by their
