@@ -50,22 +50,24 @@ actor ToolApprovalHandler {
 
     /// Answer an AskUserQuestion picker.
     ///
-    /// The picker lists options as `1.`, `2.`, … and a bare digit selects and
-    /// submits immediately. For multi-select questions each digit only toggles
-    /// an option and leaves the cursor on the first row, so Return would toggle
-    /// that row instead of submitting: the cursor has to walk down to the
-    /// `Submit` row first. After the last question the picker shows a "Ready to
-    /// submit your answers?" review screen that needs one more Return.
+    /// Digit shortcuts only work in the plain picker — the side-by-side variant
+    /// (options carrying a `preview`) ignores them, so an answer sent that way
+    /// vanished silently. Both variants respond to arrow keys and Return, so the
+    /// cursor is walked onto the wanted row instead, matched by its label.
+    ///
+    /// Return selects in a single-select question and toggles in a multi-select
+    /// one, where the `Submit` row has to be reached before the set is sent.
+    /// After the last question a "Ready to submit your answers?" review screen
+    /// takes one more Return.
     func answerQuestion(
         optionNumbers: [Int],
         multiSelect: Bool,
-        optionCount: Int,
         confirmReview: Bool,
         to target: TmuxTarget
     ) async -> Bool {
         guard !optionNumbers.isEmpty else { return false }
 
-        NotchLog.write("answer", "target=\(target.targetString) picks=\(optionNumbers) multi=\(multiSelect) options=\(optionCount) confirmReview=\(confirmReview)")
+        NotchLog.write("answer", "target=\(target.targetString) picks=\(optionNumbers) multi=\(multiSelect) confirmReview=\(confirmReview)")
 
         // A picker that isn't on screen means the keystrokes would land in a
         // shell — the single most likely way an answer silently disappears
@@ -75,24 +77,24 @@ actor ToolApprovalHandler {
             return false
         }
 
-        for number in optionNumbers {
-            guard await sendKeys(to: target, keys: String(number), pressEnter: false) else {
-                NotchLog.write("answer", "FAIL: send-keys \(number) failed")
+        for number in optionNumbers.sorted() {
+            guard await moveCursor(target: target, matches: { Self.row($0, isNumber: number) }) else {
+                NotchLog.write("answer", "FAIL: could not put cursor on option \(number)")
                 return false
             }
-            if multiSelect {
-                try? await Task.sleep(for: .milliseconds(80))
+            guard await sendKey(named: "Enter", to: target) else {
+                NotchLog.write("answer", "FAIL: Enter failed on option \(number)")
+                return false
             }
+            try? await Task.sleep(for: .milliseconds(120))
         }
 
         if multiSelect {
-            // Rows below the options: "Type something", then "Submit"
-            // ponytail: fixed step count — picker layout is stable across questions
-            for _ in 0..<(optionCount + 1) {
-                guard await sendKey(named: "Down", to: target) else { return false }
-                try? await Task.sleep(for: .milliseconds(60))
+            guard await moveCursor(target: target, matches: { $0.contains("Submit") }),
+                  await sendKey(named: "Enter", to: target) else {
+                NotchLog.write("answer", "FAIL: could not submit multi-select set")
+                return false
             }
-            guard await sendKey(named: "Enter", to: target) else { return false }
         }
 
         // Only after the last question — polling during earlier ones would leave
@@ -116,6 +118,44 @@ actor ToolApprovalHandler {
     }
 
     // MARK: - Private Methods
+
+    /// Walk the cursor down until it sits on the row `matches` accepts.
+    /// Long labels wrap onto a second line, so rows are matched by their
+    /// leading number rather than their text.
+    private func moveCursor(
+        target: TmuxTarget,
+        matches: @Sendable (String) -> Bool
+    ) async -> Bool {
+        let maxSteps = 24
+
+        for step in 0...maxSteps {
+            guard let pane = await capturePane(target: target) else { return false }
+            if let cursorLine = Self.cursorLine(pane), matches(cursorLine) {
+                return true
+            }
+            guard step < maxSteps else { break }
+            guard await sendKey(named: "Down", to: target) else { return false }
+            try? await Task.sleep(for: .milliseconds(60))
+        }
+
+        return false
+    }
+
+    /// The picker row the cursor is on. The prompt line also carries `❯`, so
+    /// only rows that look like picker entries count.
+    private static func cursorLine(_ pane: String) -> String? {
+        pane.components(separatedBy: "\n").last { line in
+            guard line.contains("❯") else { return false }
+            let body = line.drop { $0 != "❯" }.dropFirst().trimmingCharacters(in: .whitespaces)
+            return body.first?.isNumber == true || body.hasPrefix("Submit")
+        }
+    }
+
+    /// Whether a picker row is the numbered entry `number`
+    private static func row(_ line: String, isNumber number: Int) -> Bool {
+        let body = line.drop { $0 != "❯" }.dropFirst().trimmingCharacters(in: .whitespaces)
+        return body.hasPrefix("\(number).")
+    }
 
     /// Last few non-empty lines of a pane, for log context
     private static func tail(_ pane: String, lines: Int = 4) -> String {

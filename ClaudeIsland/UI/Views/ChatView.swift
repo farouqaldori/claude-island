@@ -26,6 +26,7 @@ struct ChatView: View {
     @State private var isBottomVisible: Bool = true
     @State private var questionIndex: Int = 0
     @State private var selectedOptions: Set<Int> = []
+    @State private var isSendingAnswer: Bool = false
     @FocusState private var isInputFocused: Bool
 
     init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
@@ -458,18 +459,18 @@ struct ChatView: View {
                 questionNumber: index + 1,
                 questionCount: set.questions.count,
                 selected: $selectedOptions,
+                isSending: isSendingAnswer,
                 onSubmit: { numbers, multiSelect in
                     let question = set.questions[index]
-                    let picks = numbers
-                        .compactMap { question.options.indices.contains($0 - 1) ? question.options[$0 - 1].label : nil }
-                        .joined(separator: ", ")
+                    let labels = numbers.sorted().compactMap {
+                        question.options.indices.contains($0 - 1) ? question.options[$0 - 1].label : nil
+                    }
                     answerQuestion(
                         numbers: numbers,
+                        labels: labels,
                         multiSelect: multiSelect,
-                        optionCount: question.options.count,
                         isLastQuestion: index + 1 == set.questions.count,
-                        toolUseId: set.toolUseId,
-                        picks: picks
+                        toolUseId: set.toolUseId
                     )
                 }
             )
@@ -489,20 +490,24 @@ struct ChatView: View {
     /// Send the chosen option numbers to the terminal picker
     private func answerQuestion(
         numbers: [Int],
+        labels: [String],
         multiSelect: Bool,
-        optionCount: Int,
         isLastQuestion: Bool,
-        toolUseId: String,
-        picks: String
+        toolUseId: String
     ) {
+        guard !isSendingAnswer else { return }
         guard let tty = session.tty else {
             NotchLog.write("answer", "no tty for session \(sessionId.prefix(8)) — cannot send")
             return
         }
 
+        let picks = labels.joined(separator: ", ")
         selectedOptions = []
+        isSendingAnswer = true
 
         Task {
+            defer { Task { @MainActor in isSendingAnswer = false } }
+
             guard let target = await findTmuxTarget(tty: tty) else {
                 NotchLog.write("answer", "no tmux pane matched tty=\(tty) — answer not sent")
                 return
@@ -511,7 +516,6 @@ struct ChatView: View {
             let sent = await ToolApprovalHandler.shared.answerQuestion(
                 optionNumbers: numbers,
                 multiSelect: multiSelect,
-                optionCount: optionCount,
                 confirmReview: isLastQuestion,
                 to: target
             )
@@ -1190,6 +1194,7 @@ struct QuestionAnswerBar: View {
     let questionNumber: Int
     let questionCount: Int
     @Binding var selected: Set<Int>
+    let isSending: Bool
     let onSubmit: ([Int], Bool) -> Void
 
     var body: some View {
@@ -1207,7 +1212,11 @@ struct QuestionAnswerBar: View {
 
                 Spacer()
 
-                if question.multiSelect && !selected.isEmpty {
+                if isSending {
+                    Text("Gönderiliyor…")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.5))
+                } else if question.multiSelect && !selected.isEmpty {
                     Button {
                         onSubmit(selected.sorted(), true)
                     } label: {
@@ -1243,6 +1252,7 @@ struct QuestionAnswerBar: View {
         let isSelected = selected.contains(number)
 
         return Button {
+            guard !isSending else { return }
             if question.multiSelect {
                 if isSelected { selected.remove(number) } else { selected.insert(number) }
             } else {
