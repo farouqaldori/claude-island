@@ -65,8 +65,19 @@ actor ToolApprovalHandler {
     ) async -> Bool {
         guard !optionNumbers.isEmpty else { return false }
 
+        NotchLog.write("answer", "target=\(target.targetString) picks=\(optionNumbers) multi=\(multiSelect) options=\(optionCount) confirmReview=\(confirmReview)")
+
+        // A picker that isn't on screen means the keystrokes would land in a
+        // shell — the single most likely way an answer silently disappears
+        let before = await capturePane(target: target) ?? ""
+        guard before.contains("to navigate") || before.contains("Enter to select") else {
+            NotchLog.write("answer", "ABORT: no picker in pane \(target.targetString). tail=\(Self.tail(before))")
+            return false
+        }
+
         for number in optionNumbers {
             guard await sendKeys(to: target, keys: String(number), pressEnter: false) else {
+                NotchLog.write("answer", "FAIL: send-keys \(number) failed")
                 return false
             }
             if multiSelect {
@@ -89,10 +100,30 @@ actor ToolApprovalHandler {
         if confirmReview {
             await confirmReviewIfPresent(target: target)
         }
+
+        // The picker redraws on every accepted keystroke. An unchanged pane
+        // means nothing was accepted, so report failure rather than let the UI
+        // record an answer that never arrived.
+        try? await Task.sleep(for: .milliseconds(250))
+        let after = await capturePane(target: target) ?? ""
+        guard after != before else {
+            NotchLog.write("answer", "FAIL: pane unchanged after keys. tail=\(Self.tail(after))")
+            return false
+        }
+
+        NotchLog.write("answer", "OK: pane advanced. tail=\(Self.tail(after))")
         return true
     }
 
     // MARK: - Private Methods
+
+    /// Last few non-empty lines of a pane, for log context
+    private static func tail(_ pane: String, lines: Int = 4) -> String {
+        pane.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .suffix(lines)
+            .joined(separator: " | ")
+    }
 
     /// Confirm the final "Ready to submit your answers?" screen when it appears.
     /// The cursor already sits on "Submit answers", so Return is enough.
@@ -101,10 +132,12 @@ actor ToolApprovalHandler {
             try? await Task.sleep(for: .milliseconds(300))
             guard let pane = await capturePane(target: target) else { continue }
             if pane.contains("Ready to submit your answers?") {
-                _ = await sendKey(named: "Enter", to: target)
+                let sent = await sendKey(named: "Enter", to: target)
+                NotchLog.write("answer", "review screen confirmed (enter sent=\(sent))")
                 return
             }
         }
+        NotchLog.write("answer", "no review screen appeared within 2.4s")
     }
 
     /// Current visible text of the target pane

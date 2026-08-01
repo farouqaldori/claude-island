@@ -495,28 +495,40 @@ struct ChatView: View {
         toolUseId: String,
         picks: String
     ) {
-        guard let tty = session.tty else { return }
+        guard let tty = session.tty else {
+            NotchLog.write("answer", "no tty for session \(sessionId.prefix(8)) — cannot send")
+            return
+        }
 
-        Task { await SessionStore.shared.recordQuestionAnswer(
-            sessionId: sessionId,
-            toolUseId: toolUseId,
-            answer: picks
-        ) }
-
-        // Advance locally: the picker moves to the next question immediately,
-        // and the JSONL result only lands once every question is answered
-        questionIndex += 1
         selectedOptions = []
 
         Task {
-            guard let target = await findTmuxTarget(tty: tty) else { return }
-            _ = await ToolApprovalHandler.shared.answerQuestion(
+            guard let target = await findTmuxTarget(tty: tty) else {
+                NotchLog.write("answer", "no tmux pane matched tty=\(tty) — answer not sent")
+                return
+            }
+
+            let sent = await ToolApprovalHandler.shared.answerQuestion(
                 optionNumbers: numbers,
                 multiSelect: multiSelect,
                 optionCount: optionCount,
                 confirmReview: isLastQuestion,
                 to: target
             )
+
+            // Only advance once the picker actually took the keys — recording an
+            // answer that never arrived hides the question and strands the session
+            guard sent else {
+                NotchLog.write("answer", "not recorded: send failed for \(picks)")
+                return
+            }
+
+            await SessionStore.shared.recordQuestionAnswer(
+                sessionId: sessionId,
+                toolUseId: toolUseId,
+                answer: picks
+            )
+            await MainActor.run { questionIndex += 1 }
         }
     }
 
