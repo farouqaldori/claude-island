@@ -473,8 +473,8 @@ struct AskUserQuestionResultContent: View {
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.6))
 
-                    // Answer
-                    if let answer = result.answers["\(index)"] {
+                    // Answer — keyed by question text, older payloads keyed by index
+                    if let answer = result.answers[question.question] ?? result.answers["\(index)"] {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.turn.down.right")
                                 .font(.system(size: 9))

@@ -51,9 +51,17 @@ actor ToolApprovalHandler {
     /// Answer an AskUserQuestion picker.
     ///
     /// The picker lists options as `1.`, `2.`, … and a bare digit selects and
-    /// submits immediately. For multi-select questions each digit toggles an
-    /// option and Return confirms the set.
-    func answerQuestion(optionNumbers: [Int], multiSelect: Bool, to target: TmuxTarget) async -> Bool {
+    /// submits immediately. For multi-select questions each digit only toggles
+    /// an option and leaves the cursor on the first row, so Return would toggle
+    /// that row instead of submitting: the cursor has to walk down to the
+    /// `Submit` row first. After the last question the picker shows a "Ready to
+    /// submit your answers?" review screen that needs one more Return.
+    func answerQuestion(
+        optionNumbers: [Int],
+        multiSelect: Bool,
+        optionCount: Int,
+        to target: TmuxTarget
+    ) async -> Bool {
         guard !optionNumbers.isEmpty else { return false }
 
         for number in optionNumbers {
@@ -65,13 +73,58 @@ actor ToolApprovalHandler {
             }
         }
 
-        guard multiSelect else { return true }
+        if multiSelect {
+            // Rows below the options: "Type something", then "Submit"
+            // ponytail: fixed step count — picker layout is stable across questions
+            for _ in 0..<(optionCount + 1) {
+                guard await sendKey(named: "Down", to: target) else { return false }
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+            guard await sendKey(named: "Enter", to: target) else { return false }
+        }
 
-        try? await Task.sleep(for: .milliseconds(120))
-        return await sendKeys(to: target, keys: "", pressEnter: true)
+        await confirmReviewIfPresent(target: target)
+        return true
     }
 
     // MARK: - Private Methods
+
+    /// Confirm the final "Ready to submit your answers?" screen when it appears.
+    /// The cursor already sits on "Submit answers", so Return is enough.
+    private func confirmReviewIfPresent(target: TmuxTarget) async {
+        for _ in 0..<8 {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let pane = await capturePane(target: target) else { continue }
+            if pane.contains("Ready to submit your answers?") {
+                _ = await sendKey(named: "Enter", to: target)
+                return
+            }
+        }
+    }
+
+    /// Current visible text of the target pane
+    private func capturePane(target: TmuxTarget) async -> String? {
+        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else { return nil }
+        return try? await ProcessExecutor.shared.run(
+            tmuxPath,
+            arguments: ["capture-pane", "-t", target.targetString, "-p"]
+        )
+    }
+
+    /// Send a named key (Down, Enter, …) rather than literal text
+    private func sendKey(named key: String, to target: TmuxTarget) async -> Bool {
+        guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else { return false }
+        do {
+            _ = try await ProcessExecutor.shared.run(
+                tmuxPath,
+                arguments: ["send-keys", "-t", target.targetString, key]
+            )
+            return true
+        } catch {
+            Self.logger.error("Error: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
 
     private func sendKeys(to target: TmuxTarget, keys: String, pressEnter: Bool) async -> Bool {
         guard let tmuxPath = await TmuxPathFinder.shared.getTmuxPath() else {

@@ -132,6 +132,9 @@ struct ToolCallItem: Equatable, Sendable {
     let input: [String: String]
     var status: ToolStatus
     var result: String?
+
+    /// AskUserQuestion: options sent from the notch, one line per question
+    var answeredPicks: String = ""
     var structuredResult: ToolResultData?
 
     /// For Task tools: nested subagent tool calls
@@ -194,6 +197,7 @@ struct ToolCallItem: Equatable, Sendable {
         lhs.input == rhs.input &&
         lhs.status == rhs.status &&
         lhs.result == rhs.result &&
+        lhs.answeredPicks == rhs.answeredPicks &&
         lhs.structuredResult == rhs.structuredResult &&
         lhs.subagentTools == rhs.subagentTools
     }

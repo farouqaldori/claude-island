@@ -435,10 +435,13 @@ actor SessionStore {
     private func processToolCompleted(sessionId: String, toolUseId: String, result: ToolCompletionResult) async {
         guard var session = sessions[sessionId] else { return }
 
-        // Check if this tool is already completed (avoid duplicate processing)
+        // Check if this tool is already completed (avoid duplicate processing).
+        // A completed tool with no result yet is still worth updating: hooks mark
+        // completion without a payload, the result only arrives from JSONL.
         if let existingItem = session.chatItems.first(where: { $0.id == toolUseId }),
            case .toolCall(let tool) = existingItem.type,
-           tool.status == .success || tool.status == .error || tool.status == .interrupted {
+           tool.status == .success || tool.status == .error || tool.status == .interrupted,
+           tool.result != nil || tool.structuredResult != nil {
             // Already completed, skip
             return
         }
@@ -702,6 +705,12 @@ actor SessionStore {
 
         updateQuestionPhase(&session)
 
+        backfillToolResults(
+            session: &session,
+            toolResults: payload.toolResults,
+            structuredResults: payload.structuredResults
+        )
+
         sessions[payload.sessionId] = session
 
         await emitToolCompletionEvents(
@@ -802,6 +811,58 @@ actor SessionStore {
     }
 
     /// Emit toolCompleted events for tools that have results in JSONL but aren't marked complete yet
+    /// Record what was sent to an AskUserQuestion picker from the notch, so the
+    /// chat keeps a record of the picks. The JSONL result for these tools does
+    /// not reliably reach the store, and the answer is worth keeping visible.
+    func recordQuestionAnswer(sessionId: String, toolUseId: String, answer: String) {
+        guard var session = sessions[sessionId],
+              let idx = session.chatItems.firstIndex(where: { $0.id == toolUseId }),
+              case .toolCall(var tool) = session.chatItems[idx].type else { return }
+
+        let previous = tool.answeredPicks
+        tool.answeredPicks = previous.isEmpty ? answer : previous + "\n" + answer
+        session.chatItems[idx] = ChatHistoryItem(
+            id: toolUseId,
+            type: .toolCall(tool),
+            timestamp: session.chatItems[idx].timestamp
+        )
+        sessions[sessionId] = session
+        publishState()
+    }
+
+    /// Fill in results for tool items that hooks created. Hook events carry no
+    /// payload, and a hook-made item is skipped by the JSONL merge (its id is
+    /// already known), so without this the result never lands anywhere.
+    private func backfillToolResults(
+        session: inout SessionState,
+        toolResults: [String: ConversationParser.ToolResult],
+        structuredResults: [String: ToolResultData]
+    ) {
+        for i in 0..<session.chatItems.count {
+            let id = session.chatItems[i].id
+            guard case .toolCall(var tool) = session.chatItems[i].type,
+                  tool.result == nil, tool.structuredResult == nil,
+                  toolResults[id] != nil || structuredResults[id] != nil else { continue }
+
+            let completion = ToolCompletionResult.from(
+                parserResult: toolResults[id],
+                structuredResult: structuredResults[id]
+            )
+            guard completion.result != nil || completion.structuredResult != nil else { continue }
+
+            tool.result = completion.result
+            tool.structuredResult = completion.structuredResult
+            if tool.status == .running || tool.status == .waitingForApproval {
+                tool.status = completion.status
+            }
+            session.chatItems[i] = ChatHistoryItem(
+                id: id,
+                type: .toolCall(tool),
+                timestamp: session.chatItems[i].timestamp
+            )
+        }
+    }
+
     private func emitToolCompletionEvents(
         sessionId: String,
         session: SessionState,
@@ -812,8 +873,12 @@ actor SessionStore {
         for item in session.chatItems {
             guard case .toolCall(let tool) = item.type else { continue }
 
-            // Only emit for tools that are running or waiting but have results in JSONL
-            guard tool.status == .running || tool.status == .waitingForApproval else { continue }
+            // Emit for tools still in flight, and for ones a hook marked done
+            // without carrying a result — JSONL is the only source for that payload
+            let isPending = tool.status == .running || tool.status == .waitingForApproval
+            let missesResult = tool.result == nil && tool.structuredResult == nil
+                && (toolResults[item.id] != nil || structuredResults[item.id] != nil)
+            guard isPending || missesResult else { continue }
             guard completedToolIds.contains(item.id) else { continue }
 
             let result = ToolCompletionResult.from(
@@ -1047,6 +1112,12 @@ actor SessionStore {
 
         // Sort by timestamp
         session.chatItems.sort { $0.timestamp < $1.timestamp }
+
+        backfillToolResults(
+            session: &session,
+            toolResults: toolResults,
+            structuredResults: structuredResults
+        )
 
         sessions[sessionId] = session
     }

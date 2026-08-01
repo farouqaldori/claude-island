@@ -442,7 +442,17 @@ struct ChatView: View {
                 questionCount: set.questions.count,
                 selected: $selectedOptions,
                 onSubmit: { numbers, multiSelect in
-                    answerQuestion(numbers: numbers, multiSelect: multiSelect)
+                    let question = set.questions[questionIndex]
+                    let picks = numbers
+                        .compactMap { question.options.indices.contains($0 - 1) ? question.options[$0 - 1].label : nil }
+                        .joined(separator: ", ")
+                    answerQuestion(
+                        numbers: numbers,
+                        multiSelect: multiSelect,
+                        optionCount: question.options.count,
+                        toolUseId: set.toolUseId,
+                        picks: picks
+                    )
                 }
             )
             .id("\(set.toolUseId)-\(questionIndex)")
@@ -459,8 +469,20 @@ struct ChatView: View {
     }
 
     /// Send the chosen option numbers to the terminal picker
-    private func answerQuestion(numbers: [Int], multiSelect: Bool) {
+    private func answerQuestion(
+        numbers: [Int],
+        multiSelect: Bool,
+        optionCount: Int,
+        toolUseId: String,
+        picks: String
+    ) {
         guard let tty = session.tty else { return }
+
+        Task { await SessionStore.shared.recordQuestionAnswer(
+            sessionId: sessionId,
+            toolUseId: toolUseId,
+            answer: picks
+        ) }
 
         // Advance locally: the picker moves to the next question immediately,
         // and the JSONL result only lands once every question is answered
@@ -472,6 +494,7 @@ struct ChatView: View {
             _ = await ToolApprovalHandler.shared.answerQuestion(
                 optionNumbers: numbers,
                 multiSelect: multiSelect,
+                optionCount: optionCount,
                 to: target
             )
         }
@@ -777,7 +800,16 @@ struct ToolCallView: View {
     }
 
     private var showContent: Bool {
-        tool.name == "Edit" || isExpanded
+        // AskUserQuestion always shows its answers — what was picked matters
+        // after the fact, and hiding it behind a tap loses the record
+        tool.name == "Edit" || tool.name == "AskUserQuestion" || isExpanded
+    }
+
+    /// Question texts of an AskUserQuestion call
+    private var askedQuestions: [String] {
+        guard tool.name == "AskUserQuestion" else { return [] }
+        return PendingQuestionSet.parse(toolUseId: tool.name, input: tool.input)?
+            .questions.map(\.question) ?? []
     }
 
     private var agentDescription: String? {
@@ -822,6 +854,12 @@ struct ToolCallView: View {
                         .foregroundColor(textColor.opacity(0.7))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                } else if tool.name == "AskUserQuestion", let asked = askedQuestions.first {
+                    Text(asked)
+                        .font(.system(size: 11))
+                        .foregroundColor(textColor.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if MCPToolFormatter.isMCPTool(tool.name) && !tool.input.isEmpty {
                     Text(MCPToolFormatter.formatArgs(tool.input))
                         .font(.system(size: 11))
@@ -846,6 +884,20 @@ struct ToolCallView: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isExpanded)
                 }
+            }
+
+            // Options sent from the notch — kept visible after the picker closes
+            if !tool.answeredPicks.isEmpty {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(tool.answeredPicks.components(separatedBy: "\n").enumerated()), id: \.offset) { _, pick in
+                        Text("→ \(pick)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.green.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.leading, 12)
+                .padding(.top, 2)
             }
 
             // Subagent tools list (for Task/Agent tools)
@@ -1166,11 +1218,19 @@ struct QuestionAnswerBar: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Text("\(number)")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundColor(isSelected ? .black : .white.opacity(0.5))
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.08)))
+                Group {
+                    if question.multiSelect {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 14))
+                            .foregroundColor(isSelected ? .white.opacity(0.95) : .white.opacity(0.4))
+                    } else {
+                        Text("\(number)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(isSelected ? .black : .white.opacity(0.5))
+                            .background(Circle().fill(isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.08)).frame(width: 18, height: 18))
+                    }
+                }
+                .frame(width: 18, height: 18)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(option.label)
