@@ -60,6 +60,7 @@ actor ToolApprovalHandler {
         optionNumbers: [Int],
         multiSelect: Bool,
         optionCount: Int,
+        confirmReview: Bool,
         to target: TmuxTarget
     ) async -> Bool {
         guard !optionNumbers.isEmpty else { return false }
@@ -83,7 +84,11 @@ actor ToolApprovalHandler {
             guard await sendKey(named: "Enter", to: target) else { return false }
         }
 
-        await confirmReviewIfPresent(target: target)
+        // Only after the last question — polling during earlier ones would leave
+        // two watchers racing to press Return on the same review screen
+        if confirmReview {
+            await confirmReviewIfPresent(target: target)
+        }
         return true
     }
 

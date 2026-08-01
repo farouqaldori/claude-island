@@ -431,18 +431,35 @@ struct ChatView: View {
         return PendingQuestionSet.parse(toolUseId: item.id, input: tool.input)
     }
 
+    /// How many questions of the pending set were already answered from the notch.
+    /// Derived from the store rather than local state so recreating the view
+    /// doesn't rewind the picker and re-ask an answered question.
+    private var answeredQuestionCount: Int {
+        guard let set = pendingQuestionSet,
+              let item = history.first(where: { $0.id == set.toolUseId }),
+              case .toolCall(let tool) = item.type,
+              !tool.answeredPicks.isEmpty else { return 0 }
+        return tool.answeredPicks.components(separatedBy: "\n").count
+    }
+
+    /// Question currently awaiting an answer
+    private var currentQuestionIndex: Int {
+        max(questionIndex, answeredQuestionCount)
+    }
+
     /// Bar for interactive tools like AskUserQuestion that need terminal input
     @ViewBuilder
     private var interactivePromptBar: some View {
         if let set = pendingQuestionSet, session.isInTmux,
-           questionIndex < set.questions.count {
+           currentQuestionIndex < set.questions.count {
+            let index = currentQuestionIndex
             QuestionAnswerBar(
-                question: set.questions[questionIndex],
-                questionNumber: questionIndex + 1,
+                question: set.questions[index],
+                questionNumber: index + 1,
                 questionCount: set.questions.count,
                 selected: $selectedOptions,
                 onSubmit: { numbers, multiSelect in
-                    let question = set.questions[questionIndex]
+                    let question = set.questions[index]
                     let picks = numbers
                         .compactMap { question.options.indices.contains($0 - 1) ? question.options[$0 - 1].label : nil }
                         .joined(separator: ", ")
@@ -450,12 +467,13 @@ struct ChatView: View {
                         numbers: numbers,
                         multiSelect: multiSelect,
                         optionCount: question.options.count,
+                        isLastQuestion: index + 1 == set.questions.count,
                         toolUseId: set.toolUseId,
                         picks: picks
                     )
                 }
             )
-            .id("\(set.toolUseId)-\(questionIndex)")
+            .id("\(set.toolUseId)-\(index)")
             .onChange(of: set.toolUseId) { _, _ in
                 questionIndex = 0
                 selectedOptions = []
@@ -473,6 +491,7 @@ struct ChatView: View {
         numbers: [Int],
         multiSelect: Bool,
         optionCount: Int,
+        isLastQuestion: Bool,
         toolUseId: String,
         picks: String
     ) {
@@ -495,6 +514,7 @@ struct ChatView: View {
                 optionNumbers: numbers,
                 multiSelect: multiSelect,
                 optionCount: optionCount,
+                confirmReview: isLastQuestion,
                 to: target
             )
         }
