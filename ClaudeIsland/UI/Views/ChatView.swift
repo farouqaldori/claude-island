@@ -24,6 +24,9 @@ struct ChatView: View {
     @State private var newMessageCount: Int = 0
     @State private var previousHistoryCount: Int = 0
     @State private var isBottomVisible: Bool = true
+    @State private var questionIndex: Int = 0
+    @State private var selectedOptions: Set<Int> = []
+    @State private var isSendingAnswer: Bool = false
     @FocusState private var isInputFocused: Bool
 
     init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
@@ -419,12 +422,121 @@ struct ChatView: View {
 
     // MARK: - Interactive Prompt Bar
 
+    /// The unanswered AskUserQuestion of this session, if any
+    private var pendingQuestionSet: PendingQuestionSet? {
+        guard let item = history.last(where: { item in
+            guard case .toolCall(let tool) = item.type else { return false }
+            return tool.name == "AskUserQuestion"
+        }), case .toolCall(let tool) = item.type, tool.result == nil else { return nil }
+
+        return PendingQuestionSet.parse(toolUseId: item.id, input: tool.input)
+    }
+
+    /// How many questions of the pending set were already answered from the notch.
+    /// Derived from the store rather than local state so recreating the view
+    /// doesn't rewind the picker and re-ask an answered question.
+    private var answeredQuestionCount: Int {
+        guard let set = pendingQuestionSet,
+              let item = history.first(where: { $0.id == set.toolUseId }),
+              case .toolCall(let tool) = item.type,
+              !tool.answeredPicks.isEmpty else { return 0 }
+        return tool.answeredPicks.components(separatedBy: "\n").count
+    }
+
+    /// Question currently awaiting an answer
+    private var currentQuestionIndex: Int {
+        max(questionIndex, answeredQuestionCount)
+    }
+
     /// Bar for interactive tools like AskUserQuestion that need terminal input
+    @ViewBuilder
     private var interactivePromptBar: some View {
-        ChatInteractivePromptBar(
-            isInTmux: session.isInTmux,
-            onGoToTerminal: { focusTerminal() }
-        )
+        if let set = pendingQuestionSet, session.isInTmux,
+           currentQuestionIndex < set.questions.count {
+            let index = currentQuestionIndex
+            QuestionAnswerBar(
+                question: set.questions[index],
+                questionNumber: index + 1,
+                questionCount: set.questions.count,
+                selected: $selectedOptions,
+                isSending: isSendingAnswer,
+                onSubmit: { numbers, multiSelect in
+                    let question = set.questions[index]
+                    let labels = numbers.sorted().compactMap {
+                        question.options.indices.contains($0 - 1) ? question.options[$0 - 1].label : nil
+                    }
+                    answerQuestion(
+                        numbers: numbers,
+                        labels: labels,
+                        multiSelect: multiSelect,
+                        optionCount: question.options.count,
+                        isLastQuestion: index + 1 == set.questions.count,
+                        toolUseId: set.toolUseId
+                    )
+                }
+            )
+            .id("\(set.toolUseId)-\(index)")
+            .onChange(of: set.toolUseId) { _, _ in
+                questionIndex = 0
+                selectedOptions = []
+            }
+        } else {
+            ChatInteractivePromptBar(
+                isInTmux: session.isInTmux,
+                onGoToTerminal: { focusTerminal() }
+            )
+        }
+    }
+
+    /// Send the chosen option numbers to the terminal picker
+    private func answerQuestion(
+        numbers: [Int],
+        labels: [String],
+        multiSelect: Bool,
+        optionCount: Int,
+        isLastQuestion: Bool,
+        toolUseId: String
+    ) {
+        guard !isSendingAnswer else { return }
+        guard let tty = session.tty else {
+            NotchLog.write("answer", "no tty for session \(sessionId.prefix(8)) — cannot send")
+            return
+        }
+
+        let picks = labels.joined(separator: ", ")
+        selectedOptions = []
+        isSendingAnswer = true
+
+        Task {
+            defer { Task { @MainActor in isSendingAnswer = false } }
+
+            guard let target = await findTmuxTarget(tty: tty) else {
+                NotchLog.write("answer", "no tmux pane matched tty=\(tty) — answer not sent")
+                return
+            }
+
+            let sent = await ToolApprovalHandler.shared.answerQuestion(
+                optionNumbers: numbers,
+                multiSelect: multiSelect,
+                optionCount: optionCount,
+                confirmReview: isLastQuestion,
+                to: target
+            )
+
+            // Only advance once the picker actually took the keys — recording an
+            // answer that never arrived hides the question and strands the session
+            guard sent else {
+                NotchLog.write("answer", "not recorded: send failed for \(picks)")
+                return
+            }
+
+            await SessionStore.shared.recordQuestionAnswer(
+                sessionId: sessionId,
+                toolUseId: toolUseId,
+                answer: picks
+            )
+            await MainActor.run { questionIndex += 1 }
+        }
     }
 
     // MARK: - Autoscroll Management
@@ -505,8 +617,10 @@ struct ChatView: View {
 
                 let target = parts[0]
                 let paneTty = parts[1].replacingOccurrences(of: "/dev/", with: "")
+                // Hook-reported TTYs carry the /dev/ prefix, pane TTYs may not
+                let sessionTty = tty.replacingOccurrences(of: "/dev/", with: "")
 
-                if paneTty == tty {
+                if paneTty == sessionTty {
                     return TmuxTarget(from: target)
                 }
             }
@@ -725,7 +839,16 @@ struct ToolCallView: View {
     }
 
     private var showContent: Bool {
-        tool.name == "Edit" || isExpanded
+        // AskUserQuestion always shows its answers — what was picked matters
+        // after the fact, and hiding it behind a tap loses the record
+        tool.name == "Edit" || tool.name == "AskUserQuestion" || isExpanded
+    }
+
+    /// Question texts of an AskUserQuestion call
+    private var askedQuestions: [String] {
+        guard tool.name == "AskUserQuestion" else { return [] }
+        return PendingQuestionSet.parse(toolUseId: tool.name, input: tool.input)?
+            .questions.map(\.question) ?? []
     }
 
     private var agentDescription: String? {
@@ -770,6 +893,12 @@ struct ToolCallView: View {
                         .foregroundColor(textColor.opacity(0.7))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                } else if tool.name == "AskUserQuestion", let asked = askedQuestions.first {
+                    Text(asked)
+                        .font(.system(size: 11))
+                        .foregroundColor(textColor.opacity(0.7))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 } else if MCPToolFormatter.isMCPTool(tool.name) && !tool.input.isEmpty {
                     Text(MCPToolFormatter.formatArgs(tool.input))
                         .font(.system(size: 11))
@@ -794,6 +923,20 @@ struct ToolCallView: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isExpanded)
                 }
+            }
+
+            // Options sent from the notch — kept visible after the picker closes
+            if !tool.answeredPicks.isEmpty {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(tool.answeredPicks.components(separatedBy: "\n").enumerated()), id: \.offset) { _, pick in
+                        Text("→ \(pick)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.green.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.leading, 12)
+                .padding(.top, 2)
             }
 
             // Subagent tools list (for Task/Agent tools)
@@ -1043,6 +1186,123 @@ struct InterruptedMessageView: View {
                 .foregroundColor(.red)
             Spacer()
         }
+    }
+}
+
+// MARK: - Question Answer Bar
+
+/// Clickable options for a pending AskUserQuestion, answered straight from the notch
+struct QuestionAnswerBar: View {
+    let question: PendingQuestion
+    let questionNumber: Int
+    let questionCount: Int
+    @Binding var selected: Set<Int>
+    let isSending: Bool
+    let onSubmit: ([Int], Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(question.header)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(TerminalColors.amber)
+
+                if questionCount > 1 {
+                    Text("\(questionNumber)/\(questionCount)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+
+                Spacer()
+
+                if isSending {
+                    Text("Gönderiliyor…")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.5))
+                } else if question.multiSelect && !selected.isEmpty {
+                    Button {
+                        onSubmit(selected.sorted(), true)
+                    } label: {
+                        Text("Send \(selected.count)")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.white.opacity(0.95)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(question.question)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 4) {
+                ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
+                    optionRow(index: index, option: option)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.2))
+    }
+
+    private func optionRow(index: Int, option: PendingQuestionOption) -> some View {
+        let number = index + 1
+        let isSelected = selected.contains(number)
+
+        return Button {
+            guard !isSending else { return }
+            if question.multiSelect {
+                if isSelected { selected.remove(number) } else { selected.insert(number) }
+            } else {
+                onSubmit([number], false)
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Group {
+                    if question.multiSelect {
+                        Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 14))
+                            .foregroundColor(isSelected ? .white.opacity(0.95) : .white.opacity(0.4))
+                    } else {
+                        Text("\(number)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(isSelected ? .black : .white.opacity(0.5))
+                            .background(Circle().fill(isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0.08)).frame(width: 18, height: 18))
+                    }
+                }
+                .frame(width: 18, height: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
+                        .multilineTextAlignment(.leading)
+
+                    if !option.description.isEmpty {
+                        Text(option.description)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.45))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.white.opacity(0.12) : Color.white.opacity(0.05))
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

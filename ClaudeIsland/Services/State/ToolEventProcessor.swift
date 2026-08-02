@@ -218,6 +218,12 @@ enum ToolEventProcessor {
                 input[key] = String(num)
             } else if let bool = value.value as? Bool {
                 input[key] = bool ? "true" : "false"
+            } else if JSONSerialization.isValidJSONObject([value.value]),
+                      let data = try? JSONSerialization.data(withJSONObject: value.value),
+                      let json = String(data: data, encoding: .utf8) {
+                // Nested arrays/objects (e.g. AskUserQuestion's `questions`) are kept
+                // as raw JSON so callers can decode them instead of losing them
+                input[key] = json
             }
         }
         return input

@@ -187,6 +187,29 @@ actor SessionStore {
         )
     }
 
+    /// Flatten a hook's tool_input into strings. Nested arrays/objects
+    /// (e.g. AskUserQuestion's `questions`) are kept as raw JSON instead of
+    /// being dropped, so the UI can decode them.
+    private static func flattenHookInput(_ hookInput: [String: AnyCodable]?) -> [String: String] {
+        var input: [String: String] = [:]
+        guard let hookInput else { return input }
+
+        for (key, value) in hookInput {
+            if let str = value.value as? String {
+                input[key] = str
+            } else if let num = value.value as? Int {
+                input[key] = String(num)
+            } else if let bool = value.value as? Bool {
+                input[key] = bool ? "true" : "false"
+            } else if JSONSerialization.isValidJSONObject([value.value]),
+                      let data = try? JSONSerialization.data(withJSONObject: value.value),
+                      let json = String(data: data, encoding: .utf8) {
+                input[key] = json
+            }
+        }
+        return input
+    }
+
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
         switch event.event {
         case "PreToolUse":
@@ -202,18 +225,7 @@ actor SessionStore {
 
                 let toolExists = session.chatItems.contains { $0.id == toolUseId }
                 if !toolExists {
-                    var input: [String: String] = [:]
-                    if let hookInput = event.toolInput {
-                        for (key, value) in hookInput {
-                            if let str = value.value as? String {
-                                input[key] = str
-                            } else if let num = value.value as? Int {
-                                input[key] = String(num)
-                            } else if let bool = value.value as? Bool {
-                                input[key] = bool ? "true" : "false"
-                            }
-                        }
-                    }
+                    let input = Self.flattenHookInput(event.toolInput)
 
                     let placeholderItem = ChatHistoryItem(
                         id: toolUseId,
@@ -423,10 +435,13 @@ actor SessionStore {
     private func processToolCompleted(sessionId: String, toolUseId: String, result: ToolCompletionResult) async {
         guard var session = sessions[sessionId] else { return }
 
-        // Check if this tool is already completed (avoid duplicate processing)
+        // Check if this tool is already completed (avoid duplicate processing).
+        // A completed tool with no result yet is still worth updating: hooks mark
+        // completion without a payload, the result only arrives from JSONL.
         if let existingItem = session.chatItems.first(where: { $0.id == toolUseId }),
            case .toolCall(let tool) = existingItem.type,
-           tool.status == .success || tool.status == .error || tool.status == .interrupted {
+           tool.status == .success || tool.status == .error || tool.status == .interrupted,
+           tool.result != nil || tool.structuredResult != nil {
             // Already completed, skip
             return
         }
@@ -688,6 +703,14 @@ actor SessionStore {
             structuredResults: payload.structuredResults
         )
 
+        updateQuestionPhase(&session)
+
+        backfillToolResults(
+            session: &session,
+            toolResults: payload.toolResults,
+            structuredResults: payload.structuredResults
+        )
+
         sessions[payload.sessionId] = session
 
         await emitToolCompletionEvents(
@@ -697,6 +720,43 @@ actor SessionStore {
             toolResults: payload.toolResults,
             structuredResults: payload.structuredResults
         )
+    }
+
+    /// Reflect an unanswered AskUserQuestion in the session phase.
+    ///
+    /// No hook fires while the picker is on screen (PostToolUse only arrives once
+    /// the user has answered), so the JSONL tool_use block is the only live signal.
+    /// Marking it as waitingForApproval reuses every existing "needs attention"
+    /// affordance in the UI.
+    private func updateQuestionPhase(_ session: inout SessionState) {
+        let pending = session.chatItems.last { item in
+            guard case .toolCall(let tool) = item.type else { return false }
+            return tool.name == "AskUserQuestion"
+        }
+
+        var pendingId: String?
+        if let pending, case .toolCall(let tool) = pending.type,
+           tool.result == nil, tool.status == .running || tool.status == .waitingForApproval {
+            pendingId = pending.id
+        }
+
+        if let pendingId {
+            guard session.phase.approvalToolName != "AskUserQuestion" else { return }
+            let context = PermissionContext(
+                toolUseId: pendingId,
+                toolName: "AskUserQuestion",
+                toolInput: nil,
+                receivedAt: Date()
+            )
+            if let next = session.phase.transition(to: .waitingForApproval(context)) {
+                session.phase = next
+            }
+        } else if session.phase.approvalToolName == "AskUserQuestion" {
+            // Answered (or interrupted) — hand the session back to its normal flow
+            if let next = session.phase.transition(to: .processing) {
+                session.phase = next
+            }
+        }
     }
 
     /// Populate subagent tools for Task/Agent tools using their agent JSONL files
@@ -751,6 +811,58 @@ actor SessionStore {
     }
 
     /// Emit toolCompleted events for tools that have results in JSONL but aren't marked complete yet
+    /// Record what was sent to an AskUserQuestion picker from the notch, so the
+    /// chat keeps a record of the picks. The JSONL result for these tools does
+    /// not reliably reach the store, and the answer is worth keeping visible.
+    func recordQuestionAnswer(sessionId: String, toolUseId: String, answer: String) {
+        guard var session = sessions[sessionId],
+              let idx = session.chatItems.firstIndex(where: { $0.id == toolUseId }),
+              case .toolCall(var tool) = session.chatItems[idx].type else { return }
+
+        let previous = tool.answeredPicks
+        tool.answeredPicks = previous.isEmpty ? answer : previous + "\n" + answer
+        session.chatItems[idx] = ChatHistoryItem(
+            id: toolUseId,
+            type: .toolCall(tool),
+            timestamp: session.chatItems[idx].timestamp
+        )
+        sessions[sessionId] = session
+        publishState()
+    }
+
+    /// Fill in results for tool items that hooks created. Hook events carry no
+    /// payload, and a hook-made item is skipped by the JSONL merge (its id is
+    /// already known), so without this the result never lands anywhere.
+    private func backfillToolResults(
+        session: inout SessionState,
+        toolResults: [String: ConversationParser.ToolResult],
+        structuredResults: [String: ToolResultData]
+    ) {
+        for i in 0..<session.chatItems.count {
+            let id = session.chatItems[i].id
+            guard case .toolCall(var tool) = session.chatItems[i].type,
+                  tool.result == nil, tool.structuredResult == nil,
+                  toolResults[id] != nil || structuredResults[id] != nil else { continue }
+
+            let completion = ToolCompletionResult.from(
+                parserResult: toolResults[id],
+                structuredResult: structuredResults[id]
+            )
+            guard completion.result != nil || completion.structuredResult != nil else { continue }
+
+            tool.result = completion.result
+            tool.structuredResult = completion.structuredResult
+            if tool.status == .running || tool.status == .waitingForApproval {
+                tool.status = completion.status
+            }
+            session.chatItems[i] = ChatHistoryItem(
+                id: id,
+                type: .toolCall(tool),
+                timestamp: session.chatItems[i].timestamp
+            )
+        }
+    }
+
     private func emitToolCompletionEvents(
         sessionId: String,
         session: SessionState,
@@ -761,8 +873,12 @@ actor SessionStore {
         for item in session.chatItems {
             guard case .toolCall(let tool) = item.type else { continue }
 
-            // Only emit for tools that are running or waiting but have results in JSONL
-            guard tool.status == .running || tool.status == .waitingForApproval else { continue }
+            // Emit for tools still in flight, and for ones a hook marked done
+            // without carrying a result — JSONL is the only source for that payload
+            let isPending = tool.status == .running || tool.status == .waitingForApproval
+            let missesResult = tool.result == nil && tool.structuredResult == nil
+                && (toolResults[item.id] != nil || structuredResults[item.id] != nil)
+            guard isPending || missesResult else { continue }
             guard completedToolIds.contains(item.id) else { continue }
 
             let result = ToolCompletionResult.from(
@@ -996,6 +1112,12 @@ actor SessionStore {
 
         // Sort by timestamp
         session.chatItems.sort { $0.timestamp < $1.timestamp }
+
+        backfillToolResults(
+            session: &session,
+            toolResults: toolResults,
+            structuredResults: structuredResults
+        )
 
         sessions[sessionId] = session
     }

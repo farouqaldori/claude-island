@@ -157,4 +157,12 @@ extension ClaudeSessionMonitor: JSONLInterruptWatcherDelegate {
             InterruptWatcherManager.shared.stopWatching(sessionId: sessionId)
         }
     }
+
+    nonisolated func didDetectQuestionPrompt(sessionId: String, cwd: String) {
+        // Re-read the JSONL so the question's options reach the UI — nothing
+        // else triggers a sync while the picker is waiting for an answer
+        Task { @MainActor in
+            await ChatHistoryManager.shared.syncFromFile(sessionId: sessionId, cwd: cwd)
+        }
+    }
 }

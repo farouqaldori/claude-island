@@ -14,6 +14,11 @@ private let logger = Logger(subsystem: "com.claudeisland", category: "Interrupt"
 
 protocol JSONLInterruptWatcherDelegate: AnyObject {
     func didDetectInterrupt(sessionId: String)
+
+    /// An AskUserQuestion tool call was written to the JSONL. No hook fires
+    /// while its picker waits for an answer, so this is the only live signal
+    /// that the session needs input.
+    func didDetectQuestionPrompt(sessionId: String, cwd: String)
 }
 
 /// Watches a session's JSONL file for interrupt patterns in real-time
@@ -23,6 +28,7 @@ class JSONLInterruptWatcher {
     private var source: DispatchSourceFileSystemObject?
     private var lastOffset: UInt64 = 0
     private let sessionId: String
+    private let cwd: String
     private let filePath: String
     private let queue = DispatchQueue(label: "com.claudeisland.interruptwatcher", qos: .userInteractive)
 
@@ -39,6 +45,7 @@ class JSONLInterruptWatcher {
 
     init(sessionId: String, cwd: String) {
         self.sessionId = sessionId
+        self.cwd = cwd
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-")
                             .replacingOccurrences(of: ".", with: "-")
         self.filePath = ClaudePaths.projectsDir.path + "/" + projectDir + "/" + sessionId + ".jsonl"
@@ -118,6 +125,14 @@ class JSONLInterruptWatcher {
 
         let lines = newContent.components(separatedBy: "\n")
         for line in lines where !line.isEmpty {
+            if line.contains("\"AskUserQuestion\"") && line.contains("\"tool_use\"") {
+                logger.info("Detected question prompt in session: \(self.sessionId.prefix(8), privacy: .public)")
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.didDetectQuestionPrompt(sessionId: self.sessionId, cwd: self.cwd)
+                }
+            }
+
             if isInterruptLine(line) {
                 logger.info("Detected interrupt in session: \(self.sessionId.prefix(8), privacy: .public)")
                 DispatchQueue.main.async { [weak self] in
