@@ -25,7 +25,6 @@ struct NotchView: View {
     @State private var waitingForInputTimestamps: [String: Date] = [:]  // sessionId -> when it entered waitingForInput
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
-    @State private var isBouncing: Bool = false
 
     @Namespace private var activityNamespace
 
@@ -171,7 +170,6 @@ struct NotchView: View {
                     .animation(.smooth, value: activityCoordinator.expandingActivity)
                     .animation(.smooth, value: hasPendingPermission)
                     .animation(.smooth, value: hasWaitingForInput)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.5), value: isBouncing)
                     .contentShape(Rectangle())
                     .onHover { hovering in
                         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
@@ -272,10 +270,10 @@ struct NotchView: View {
                     .fill(.clear)
                     .frame(width: closedNotchSize.width - 20)
             } else {
-                // Closed with activity: black spacer (with optional bounce)
+                // Closed with activity: black spacer
                 Rectangle()
                     .fill(.black)
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
+                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top)
             }
 
             // Right side - spinner when processing/pending, checkmark when waiting for input
@@ -423,16 +421,9 @@ struct NotchView: View {
     }
 
     private func handlePendingSessionsChange(_ sessions: [SessionState]) {
-        let currentIds = Set(sessions.map { $0.stableId })
-        let newPendingIds = currentIds.subtracting(previousPendingIds)
-
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
-            viewModel.notchOpen(reason: .notification)
-        }
-
-        previousPendingIds = currentIds
+        // No auto-opening — the closed-state crab/amber indicator (showClosedActivity)
+        // already surfaces a pending permission passively, without stealing focus.
+        previousPendingIds = Set(sessions.map { $0.stableId })
     }
 
     private func handleWaitingForInputChange(_ instances: [SessionState]) {
@@ -453,33 +444,9 @@ struct NotchView: View {
             waitingForInputTimestamps.removeValue(forKey: staleId)
         }
 
-        // Bounce the notch when a session newly enters waitingForInput state
+        // No forced bounce or sound — the closed-state checkmark (hasWaitingForInput)
+        // already surfaces this passively without interrupting whatever you're doing.
         if !newWaitingIds.isEmpty {
-            // Get the sessions that just entered waitingForInput
-            let newlyWaitingSessions = waitingForInputSessions.filter { newWaitingIds.contains($0.stableId) }
-
-            // Play notification sound if the session is not actively focused
-            if let soundName = AppSettings.notificationSound.soundName {
-                // Check if we should play sound (async check for tmux pane focus)
-                Task {
-                    let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
-                    if shouldPlaySound {
-                        await MainActor.run {
-                            NSSound(named: soundName)?.play()
-                        }
-                    }
-                }
-            }
-
-            // Trigger bounce animation to get user's attention
-            DispatchQueue.main.async {
-                isBouncing = true
-                // Bounce back after a short delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    isBouncing = false
-                }
-            }
-
             // Schedule hiding the checkmark after 30 seconds
             DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [self] in
                 // Trigger a UI update to re-evaluate hasWaitingForInput
@@ -488,23 +455,5 @@ struct NotchView: View {
         }
 
         previousWaitingForInputIds = currentIds
-    }
-
-    /// Determine if notification sound should play for the given sessions
-    /// Returns true if ANY session is not actively focused
-    private func shouldPlayNotificationSound(for sessions: [SessionState]) async -> Bool {
-        for session in sessions {
-            guard let pid = session.pid else {
-                // No PID means we can't check focus, assume not focused
-                return true
-            }
-
-            let isFocused = await TerminalVisibilityDetector.isSessionFocused(sessionPid: pid)
-            if !isFocused {
-                return true
-            }
-        }
-
-        return false
     }
 }
